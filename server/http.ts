@@ -47,3 +47,6 @@ export function paging(query: any, maxLimit = 100): { limit: number; offset: num
   const offset = Math.max(0, Number.parseInt(String(query?.offset ?? "0"), 10) || 0);
   return { limit, offset };
 }
+
+/** Route parameters as plain strings (Express 5 types them as string | string[]). */
+export const P = (req: Request): Record<string, string> => req.params as Record<string, string>;
