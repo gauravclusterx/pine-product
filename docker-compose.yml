@@ -1,0 +1,39 @@
+# Production-like stack: PostgreSQL, the API, and a separate worker.
+#   docker compose up --build
+# Fill .env first (ENCRYPTION_KEY, SESSION_SECRET, PUBLIC_BASE_URL, PLATFORM_ADMIN_*).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pine
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pine}
+      POSTGRES_DB: pine
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pine"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://pine:${POSTGRES_PASSWORD:-pine}@db:5432/pine
+      NODE_ENV: production
+      INLINE_WORKER: "false"
+    ports: ["4000:4000"]
+    depends_on: { db: { condition: service_healthy } }
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["npx", "tsx", "server/worker.ts"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://pine:${POSTGRES_PASSWORD:-pine}@db:5432/pine
+      NODE_ENV: production
+    depends_on: { db: { condition: service_healthy } }
+    restart: unless-stopped
+
+volumes:
+  pgdata:
