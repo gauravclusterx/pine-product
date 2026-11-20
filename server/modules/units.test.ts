@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { settingsSchema, servesPostalCode, type Org } from "./orgs.js";
+import { settingsSchema, servesPostalCode, leadAgentFor, type Org } from "./orgs.js";
 import { providerConfig, toolSpecs, toolsFor, agentConfigSchema } from "./agents.js";
 import { scoreCall, parseTranscript } from "./qa.js";
 import { chargeFor, outcomeOf } from "./calls.js";
@@ -8,7 +8,7 @@ import { createHmac } from "crypto";
 import { toE164 } from "../lib/phone.js";
 
 const org: Org = {
-  id: "11111111-1111-1111-1111-111111111111", name: "Acme Heating & Air", slug: "acme", industry: "hvac", timezone: "America/New_York", status: "active",
+  id: "3f2b8c1e-5d4a-4b6e-9c7d-1a2b3c4d5e6f", name: "Acme Heating & Air", slug: "acme", industry: "hvac", timezone: "America/New_York", status: "active",
   rateCentsPerMinute: 25, createdAt: new Date(),
   settings: settingsSchema.parse({ services: [{ name: "AC repair", valueCents: 35000 }], serviceAreas: ["10001", "112*"], transferNumber: "(212) 555-0100" }),
 };
@@ -20,7 +20,8 @@ describe("agent projection", () => {
     expect(cfg.systemPrompt).toMatch(/Monday: 8 AM–5 PM/);
     expect(cfg.systemPrompt).toMatch(/AC repair \(typical ticket \$350\)/);
     expect(cfg.systemPrompt).toMatch(/\$89 tune-up special/);
-    expect(cfg.firstMessage).toBe("Thanks for calling Acme Heating & Air, this is Ava. How can I help you today?");
+    // Inbound: the caller name from the before-call lookup, "there" when unknown.
+    expect(cfg.firstMessage).toBe("Hi {{lookup_customer.name|there}}, thanks for calling Acme Heating & Air, this is Ava. How can I help you today?");
     expect(cfg.transferNumber).toBe("+12125550100");
     expect(cfg.callDirection).toBe("inbound");
     expect(cfg.extractionFields!.map((f) => f.name)).toContain("outcome");
@@ -29,7 +30,7 @@ describe("agent projection", () => {
     const cfg = providerConfig(org, { name: "Ava", playbook: "speed_to_lead", config: agentConfigSchema.parse({}) });
     expect(cfg.callDirection).toBe("outbound");
     expect(cfg.voicemailDetection).toBe(true);
-    expect(cfg.firstMessage).toMatch(/calling from Acme/);
+    expect(cfg.firstMessage).toBe("Hi {{greeting_name}}, this is Ava calling from Acme Heating & Air. Is now a good moment?");
   });
   it("a prompt override replaces the generated prompt", () => {
     const cfg = providerConfig(org, { name: "Ava", playbook: "custom", config: agentConfigSchema.parse({ promptOverride: "Only this." }) });
@@ -47,6 +48,20 @@ describe("agent projection", () => {
     expect(book.parameters!.find((p) => p.name === "agent_id")).toMatchObject({ source: "constant", value: "agent_x" });
     // Outbound agents cannot have a before-call tool.
     expect(toolsFor("speed_to_lead")).not.toContain("lookup_customer");
+  });
+});
+
+describe("who calls, and what they call the customer", () => {
+  it("a lead source can have its own agent; others use the default", () => {
+    const s = settingsSchema.parse({ speedToLead: { agentId: "3f2b8c1e-5d4a-4b6e-9c7d-1a2b3c4d5e6f", agentBySource: { angi: "7a1c9e2d-4b3f-4e8a-8d6c-0f1e2d3c4b5a" } } });
+    expect(leadAgentFor(s, "angi")).toBe("7a1c9e2d-4b3f-4e8a-8d6c-0f1e2d3c4b5a");
+    expect(leadAgentFor(s, "meta")).toBe("3f2b8c1e-5d4a-4b6e-9c7d-1a2b3c4d5e6f");
+    expect(leadAgentFor(settingsSchema.parse({}), "meta")).toBeNull();
+  });
+  it("the greeting name is the first name on file, or 'there'", async () => {
+    const { memoryVariables } = await import("./customers.js");
+    // memoryVariables reads the database only for a known customer; an unknown caller needs none.
+    expect((await memoryVariables(org, null)).greeting_name).toBe("there");
   });
 });
 

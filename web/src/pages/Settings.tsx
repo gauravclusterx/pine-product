@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
 import { del, get, patch, post } from "../lib/api";
-import { clockToMinutes, minutesToClock, money } from "../lib/format";
+import { clockToMinutes, minutesToClock, money, SOURCE_LABEL } from "../lib/format";
 import { useSession } from "../lib/session";
 import { ErrorNote, Field, Loading, PageHeader, Toggle } from "../components/ui";
 
@@ -117,6 +117,26 @@ export default function SettingsPage() {
             <Field label="Calling ends" hint="Never outside 8:00–21:00 local time."><input type="time" className="input" value={minutesToClock(s.callingWindow.closes)} onChange={(e) => set("callingWindow", { ...s.callingWindow, closes: clockToMinutes(e.target.value) })} disabled={ro} /></Field>
           </div>
           <Toggle checked={s.speedToLead.requireConsent} onChange={(v) => set("speedToLead", { ...s.speedToLead, requireConsent: v })} label="Only call people who agreed to be called (recommended — US law requires consent for automated calls)" />
+          <div className="pt-2">
+            <div className="text-sm font-medium">Agent per lead source</div>
+            <p className="text-xs text-ink-mute mb-2">Pick a different agent for leads from a source. "Same as above" uses the agent chosen above.</p>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {Object.entries(SOURCE_LABEL).filter(([k]) => !["phone", "manual"].includes(k)).map(([k, label]) => (
+                <label key={k} className="flex items-center gap-2 text-sm">
+                  <span className="w-28 shrink-0 text-ink-soft">{label}</span>
+                  <select className="input h-9" disabled={ro} value={s.speedToLead.agentBySource?.[k] || ""}
+                    onChange={(e) => {
+                      const next = { ...(s.speedToLead.agentBySource || {}) };
+                      if (e.target.value) next[k] = e.target.value; else delete next[k];
+                      set("speedToLead", { ...s.speedToLead, agentBySource: next });
+                    }}>
+                    <option value="">Same as above</option>
+                    {live.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </label>
+              ))}
+            </div>
+          </div>
         </section>
       </div>
       <Team />

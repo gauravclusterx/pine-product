@@ -230,7 +230,10 @@ export function stripPromptAppendix(prompt: string): string {
 }
 
 /** Variables the appendix references. Declared with empty defaults so they render blank, never as raw `{{…}}`. */
-const PLATFORM_VARIABLES: Array<{ key: string; description: string; sensitivity: "internal" | "pii" }> = [
+const PLATFORM_VARIABLES: Array<{ key: string; description: string; sensitivity: "internal" | "pii"; value?: string }> = [
+  // The name the opening line says: the CRM first name, or "there" when nobody is on file
+  // (inbound callers, unknown numbers) — so a greeting "Hi {{greeting_name}}, …" always reads well.
+  { key: "greeting_name", description: "First name of the customer for the greeting (CRM), or 'there'.", sensitivity: "pii", value: "there" },
   { key: "context", description: "Cross-channel history of this customer, injected per call by the CRM.", sensitivity: "internal" },
   { key: "profile", description: "CRM profile of this customer, injected per call by the CRM.", sensitivity: "internal" },
   // Not referenced by the prompt: the agent's tools send it back to the CRM so a booking made on
@@ -333,7 +336,7 @@ async function ensurePlatformVariables(key: string, agentId: string): Promise<vo
     await withDraftEtag(key, agentId, (etag) =>
       rasenRequest(key, "PUT", `/agents/${enc(agentId)}/variables/${enc(v.key)}`, {
         ifMatch: etag,
-        body: { value: "", description: v.description, sensitivity: v.sensitivity },
+        body: { value: v.value ?? "", description: v.description, sensitivity: v.sensitivity },
       })
     );
   }
@@ -448,6 +451,15 @@ export async function updateAgentConfig(
   if (cfg.systemPrompt !== undefined) await ensurePlatformVariables(key, agentId);
   if (opts.publish === false) return { liveVersionId: null };
   return { liveVersionId: (await publishAgent(key, agentId)).liveVersionId };
+}
+
+/** Add the customer's name to an opening line: "Hi. Akshita this side…" → "Hi {{greeting_name}}, Akshita this side…". */
+export function withGreetingName(firstMessage: string): string {
+  const s = String(firstMessage || "").trim();
+  if (!s || /\{\{\s*(greeting_name|customer_name|name|first_name)\b/.test(s)) return s;
+  const m = /^(hi|hello|hey|namaste|namaskar)\b[\s.,!]*/i.exec(s);
+  if (m) return `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()} {{greeting_name}}, ${s.slice(m[0].length)}`.trim();
+  return `Hi {{greeting_name}}! ${s}`;
 }
 
 /** Replace an agent's system prompt (used to push a knowledge base) and publish. Keeps every other setting. */
@@ -852,6 +864,11 @@ export function buildCallPayload(args: CreateOutboundCallArgs & { toE164: string
   if (args.customerName && args.customerName.trim()) {
     if (vars.name === undefined) vars.name = args.customerName.trim();
     if (vars.customer_name === undefined) vars.customer_name = args.customerName.trim();
+  }
+  // The opening line's name: CRM first name, else "there" — never blank, never a raw placeholder.
+  if (vars.greeting_name === undefined) {
+    const full = String(args.customerName || vars.customer_name || vars.name || "").trim();
+    vars.greeting_name = full ? full.split(/\s+/)[0] : "there";
   }
   // The appendix always references these two; send them blank rather than leaving a raw `{{…}}`.
   if (vars.context === undefined) vars.context = "";

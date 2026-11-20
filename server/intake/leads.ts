@@ -13,7 +13,7 @@ import { z } from "zod";
 import { one, q, tx } from "../db/pool.js";
 import { toE164 } from "../lib/phone.js";
 import { enqueue } from "../queue/queue.js";
-import { servesPostalCode, type Org } from "../modules/orgs.js";
+import { leadAgentFor, servesPostalCode, type Org } from "../modules/orgs.js";
 import { upsertCustomer } from "../modules/customers.js";
 
 export const LEAD_SOURCES = ["google_lsa", "meta", "yelp", "angi", "thumbtack", "web_form", "web_chat", "email", "manual", "api", "phone"] as const;
@@ -52,7 +52,7 @@ export async function acceptLead(org: Org, raw: LeadInput): Promise<AcceptResult
   else if (await one("SELECT 1 AS x FROM dnc_list WHERE org_id = $1 AND phone_e164 = $2", [org.id, phone])) rejectReason = "number is on the do-not-call list";
 
   const stl = org.settings.speedToLead;
-  const willCall = !rejectReason && stl.enabled && !!stl.agentId && (input.consent || !stl.requireConsent);
+  const willCall = !rejectReason && stl.enabled && !!leadAgentFor(org.settings, input.source) && (input.consent || !stl.requireConsent);
   return tx(async (t) => {
     const customer = phone
       ? await upsertCustomer(org.id, {

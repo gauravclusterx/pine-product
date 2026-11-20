@@ -12,7 +12,7 @@
 import { q, one } from "./db/pool.js";
 import { log } from "./lib/logger.js";
 import { createWorker, enqueue, PermanentJobError, type Handler, type Worker } from "./queue/queue.js";
-import { getOrg, findOrg } from "./modules/orgs.js";
+import { getOrg, findOrg, leadAgentFor } from "./modules/orgs.js";
 import { placeCall } from "./modules/outbound.js";
 import { finaliseCall, ingestCall } from "./modules/calls.js";
 import { leadVariables } from "./intake/leads.js";
@@ -32,10 +32,11 @@ export const handlers: Record<string, Handler> = {
     if (!lead || ["booked", "lost", "rejected"].includes(lead.status)) return;
     const org = await getOrg(lead.org_id);
     const stl = org.settings.speedToLead;
-    if (!stl.enabled || !stl.agentId) throw new PermanentJobError("speed to lead is off");
+    const agentId = leadAgentFor(org.settings, lead.source);
+    if (!stl.enabled || !agentId) throw new PermanentJobError("speed to lead is off");
     if (lead.attempts >= stl.maxAttempts) { await q("UPDATE leads SET status = 'lost', updated_at = now() WHERE id = $1", [lead.id]); return; }
     try {
-      await placeCall(org, { agentId: stl.agentId, phone: lead.phone_e164, leadId: lead.id, variables: leadVariables(lead), idempotencyKey: `lead:${lead.id}:${lead.attempts}` });
+      await placeCall(org, { agentId, phone: lead.phone_e164, leadId: lead.id, variables: leadVariables(lead), idempotencyKey: `lead:${lead.id}:${lead.attempts}` });
     } catch (err) {
       if (err instanceof PermanentJobError) await q("UPDATE leads SET status = 'lost', reject_reason = $2, updated_at = now() WHERE id = $1", [lead.id, err.message]);
       throw err;

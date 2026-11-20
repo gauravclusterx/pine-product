@@ -237,6 +237,7 @@ describe("lead intake → speed to lead", () => {
     expect(calls[0]).toMatchObject({ agentId: agent.providerAgentId, customerNumber: "+12125550142", customerName: "Maria Santos" });
     expect(calls[0].variableValues.lead_service).toBe("AC Repair");
     expect(calls[0].variableValues.profile).toMatch(/Name on file: Maria Santos/);
+    expect(calls[0].variableValues.greeting_name).toBe("Maria");
     expect((await one("SELECT status, attempts, first_call_at FROM leads"))).toMatchObject({ status: "calling", attempts: 1 });
   });
 

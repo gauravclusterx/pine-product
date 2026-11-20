@@ -39,6 +39,8 @@ export const settingsSchema = z.object({
   speedToLead: z.object({
     enabled: z.boolean().default(false),
     agentId: z.string().uuid().nullable().default(null),
+    /** A different agent for leads from one source (e.g. Angi leads → "Max"). Falls back to agentId. */
+    agentBySource: z.record(z.string(), z.string().uuid()).default({}),
     maxAttempts: z.number().int().min(1).max(6).default(3),
     /** Minutes to wait before the 2nd, 3rd… attempt when the lead does not pick up. */
     retryMinutes: z.array(z.number().int().min(1).max(2880)).max(5).default([10, 120]),
@@ -82,6 +84,11 @@ export async function getOrg(orgId: string, run: Q = q): Promise<Org> {
 export async function findOrg(orgId: string): Promise<Org | null> {
   const row = await one("SELECT * FROM orgs WHERE id = $1", [orgId]);
   return row ? toOrg(row) : null;
+}
+
+/** The agent that calls a lead from this source: the source's own agent, else the default. */
+export function leadAgentFor(settings: OrgSettings, source: string): string | null {
+  return settings.speedToLead.agentBySource[source] || settings.speedToLead.agentId || null;
 }
 
 export function businessHoursOf(org: Org): WeekHours {

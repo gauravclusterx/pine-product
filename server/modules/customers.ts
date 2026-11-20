@@ -129,6 +129,8 @@ export async function buildCustomerMemory(org: Org, customer: Customer | null, n
 export async function memoryVariables(org: Org, customer: Customer | null): Promise<Record<string, string>> {
   const { profile, context } = await buildCustomerMemory(org, customer);
   return {
+    // What the opening line says: "Hi {{greeting_name}}, …" — first name on file, else "there".
+    greeting_name: (customer?.name || "").trim().split(/\s+/)[0] || "there",
     customer_name: customer?.name || "",
     business_name: org.name,
     profile,

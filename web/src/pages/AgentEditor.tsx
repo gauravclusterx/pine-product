@@ -12,6 +12,14 @@ const ALL_TOOLS: Record<string, string> = {
   cancel_job: "Cancel", create_lead: "Save a lead / callback", get_estimates: "Read open estimates", get_membership: "Read membership", send_sms: "Text the customer", notify_team: "Alert the team",
 };
 
+/** "Hi, this is Ava…" → "Hi {{greeting_name}}, this is Ava…". */
+function addName(greeting: string): string {
+  const s = String(greeting || "").trim();
+  const m = /^(hi|hello|hey|namaste)\b[\s.,!]*/i.exec(s);
+  if (m) return `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()} {{greeting_name}}, ${s.slice(m[0].length)}`.trim();
+  return `Hi {{greeting_name}}! ${s}`.trim();
+}
+
 export default function AgentEditor() {
   const { id } = useParams();
   const { can } = useSession();
@@ -59,7 +67,8 @@ export default function AgentEditor() {
           <div className="card p-5 space-y-4">
             <h2 className="font-semibold">Conversation</h2>
             <Field label="Agent name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} disabled={!editable} /></Field>
-            <Field label="Greeting" hint="Leave empty for the playbook's greeting."><input className="input" value={form.greeting || ""} onChange={(e) => set("greeting", e.target.value)} placeholder={q.data.preview.firstMessage} disabled={!editable} /></Field>
+            <Field label="Greeting" hint={<>Leave empty for the playbook's greeting. Write <code>{"{{greeting_name}}"}</code> where the customer's first name goes ("there" when unknown).{" "}
+              {editable && !(form.greeting || "").includes("{{greeting_name}}") && <button type="button" className="underline text-plum" onClick={() => set("greeting", addName(form.greeting || q.data.preview.firstMessage))}>Add the customer's name</button>}</>}><input className="input" value={form.greeting || ""} onChange={(e) => set("greeting", e.target.value)} placeholder={q.data.preview.firstMessage} disabled={!editable} /></Field>
             <Field label="Client brief" hint="What is special about this business: specials, policies, who handles what, words to use or avoid.">
               <textarea className="textarea min-h-[160px]" value={form.brief} onChange={(e) => set("brief", e.target.value)} disabled={!editable} placeholder="e.g. We charge a $79 diagnostic fee, waived if the repair is done. Never book roof inspections on rainy days." />
             </Field>
