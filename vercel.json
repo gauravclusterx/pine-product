@@ -21,23 +21,23 @@
     },
     {
       "source": "/login",
-      "destination": "/app.html"
+      "destination": "/app"
     },
     {
       "source": "/app",
-      "destination": "/app.html"
+      "destination": "/app"
     },
     {
       "source": "/app/:path*",
-      "destination": "/app.html"
+      "destination": "/app"
     },
     {
       "source": "/admin",
-      "destination": "/app.html"
+      "destination": "/app"
     },
     {
       "source": "/admin/:path*",
-      "destination": "/app.html"
+      "destination": "/app"
     }
   ]
 }
