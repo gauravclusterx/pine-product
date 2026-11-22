@@ -32,7 +32,7 @@ export function buildApp() {
   if (!isTest) app.use(pinoHttp({ logger: log, autoLogging: { ignore: (req) => req.url === "/healthz" } }));
   // Raw bytes are kept for signature checks (voice provider, Meta).
   // Knowledge documents (≤ 20 MB, sent base64) need a larger body than everything else.
-  app.use(/^\/api\/agents\/[^/]+\/knowledge\/upload$/, express.json({ limit: "30mb" }));
+  app.use(/^\/api\/(agents\/[^/]+\/)?knowledge\/upload$/, express.json({ limit: "30mb" }));
   app.use(express.json({ limit: "2mb", verify: (req: any, _res, buf) => { req.rawBody = Buffer.from(buf); } }));
   app.use(express.urlencoded({ extended: false, limit: "1mb" }));
   app.use(cookieParser());

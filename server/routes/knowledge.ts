@@ -119,3 +119,82 @@ knowledgeRouter.post("/agents/:id/rollback", manager, h(async (req, res) => {
   await audit(req.auth!.orgId, req.auth!.userId, "agent.rolled_back", { agentId: agent.id, versionId });
   res.json({ ok: true, liveVersionId: live });
 }));
+
+// ── workspace library ────────────────────────────────────────────────────────
+
+const sourceId = (req: any) => { const v = String(P(req).sourceId || ""); if (!/^[A-Za-z0-9_\-]{3,80}$/.test(v)) throw badRequest("Unknown source."); return v; };
+
+/** Which of this business's agents use each source (one library read per agent). */
+async function usage(orgId: string, ws: any) {
+  const mine = await q("SELECT id, name, provider_agent_id FROM agents WHERE org_id = $1 AND status <> 'archived' AND provider_agent_id IS NOT NULL ORDER BY name", [orgId]);
+  const by = new Map<string, Array<{ id: string; name: string }>>();
+  for (const a of mine) {
+    const lib = await rasen.listAgentKnowledge(ws, a.provider_agent_id).catch(() => []);
+    for (const s of lib) by.set(s.id, [...(by.get(s.id) || []), { id: a.id, name: a.name }]);
+  }
+  return { agents: mine.map((a) => ({ id: a.id, name: a.name })), by, mine };
+}
+
+async function setAgents(orgId: string, ws: any, src: string, wanted: string[]) {
+  const { by, mine } = await usage(orgId, ws);
+  const now = new Set((by.get(src) || []).map((a) => a.id));
+  for (const a of mine) {
+    const want = wanted.includes(a.id);
+    if (want && !now.has(a.id)) { await rasen.attachKnowledge(ws, a.provider_agent_id, src); await scheduleKnowledgePublish(orgId, a.id); }
+    if (!want && now.has(a.id)) { await rasen.detachKnowledge(ws, a.provider_agent_id, src); await scheduleKnowledgePublish(orgId, a.id, 5); }
+  }
+}
+
+knowledgeRouter.get("/knowledge", viewer, h(async (req, res) => {
+  const ws = await requireVoiceWorkspace(req.auth!.orgId);
+  const sources = await rasen.listWorkspaceKnowledge(ws);
+  const { agents: list, by } = await usage(req.auth!.orgId, ws);
+  res.json({ sources: sources.map((s) => ({ ...s, agents: by.get(s.id) || [] })), agents: list, pending: sources.some((s) => ["pending", "ingesting"].includes(s.state)) });
+}));
+
+const agentIds = z.array(z.string().uuid()).max(100).default([]);
+
+knowledgeRouter.post("/knowledge", manager, h(async (req, res) => {
+  const b = parse(z.union([
+    z.object({ kind: z.literal("url"), url: httpsUrl, name: z.string().trim().max(200).optional(), agentIds }),
+    z.object({ kind: z.literal("text"), name: z.string().trim().min(1).max(200), text: z.string().trim().min(1).max(262_144), agentIds }),
+  ]), req.body);
+  const ws = await requireVoiceWorkspace(req.auth!.orgId);
+  const src = await rasen.addWorkspaceKnowledge(ws, b.kind === "url" ? { kind: "url", url: b.url, name: b.name } : { kind: "text", text: b.text, name: b.name });
+  if (b.agentIds.length) await setAgents(req.auth!.orgId, ws, src.id, b.agentIds);
+  await audit(req.auth!.orgId, req.auth!.userId, "knowledge.added", { kind: b.kind, sourceId: src.id, agents: b.agentIds.length });
+  res.status(202).json({ source: src });
+}));
+
+knowledgeRouter.post("/knowledge/upload", manager, h(async (req, res) => {
+  const b = parse(z.object({ name: z.string().trim().min(1).max(200), filename: z.string().trim().min(3).max(200), dataBase64: z.string().min(4), agentIds }), req.body);
+  if (!ALLOWED.test(b.filename)) throw badRequest("Upload a PDF, DOCX, Markdown or text file.");
+  const file = Buffer.from(b.dataBase64, "base64");
+  if (file.length > 20 * 1024 * 1024) throw badRequest("The file is larger than 20 MB.");
+  const ws = await requireVoiceWorkspace(req.auth!.orgId);
+  const src = await rasen.uploadWorkspaceKnowledge(ws, b.name, file, b.filename);
+  if (b.agentIds.length) await setAgents(req.auth!.orgId, ws, src.id, b.agentIds);
+  await audit(req.auth!.orgId, req.auth!.userId, "knowledge.added", { kind: "file", sourceId: src.id, agents: b.agentIds.length });
+  res.status(202).json({ source: src });
+}));
+
+knowledgeRouter.put("/knowledge/:sourceId/agents", manager, h(async (req, res) => {
+  const { agentIds: ids } = parse(z.object({ agentIds }), req.body);
+  const ws = await requireVoiceWorkspace(req.auth!.orgId);
+  await setAgents(req.auth!.orgId, ws, sourceId(req), ids);
+  await audit(req.auth!.orgId, req.auth!.userId, "knowledge.agents_changed", { sourceId: sourceId(req), agents: ids.length });
+  res.json({ ok: true });
+}));
+
+knowledgeRouter.post("/knowledge/:sourceId/refresh", manager, h(async (req, res) => {
+  const ws = await requireVoiceWorkspace(req.auth!.orgId);
+  res.json({ source: await rasen.refreshKnowledgeSource(ws, sourceId(req)) });
+}));
+
+knowledgeRouter.delete("/knowledge/:sourceId", manager, h(async (req, res) => {
+  const ws = await requireVoiceWorkspace(req.auth!.orgId);
+  await setAgents(req.auth!.orgId, ws, sourceId(req), []);
+  await rasen.archiveKnowledge(ws, sourceId(req));
+  await audit(req.auth!.orgId, req.auth!.userId, "knowledge.removed", { sourceId: sourceId(req) });
+  res.json({ ok: true });
+}));

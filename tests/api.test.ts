@@ -591,7 +591,7 @@ describe("campaign with hand-picked contacts, knowledge, website agents, custome
   it("knowledge: add a website and text to an agent, list it, and publishing is scheduled", async () => {
     const svc: any = await import("../server/voice/rasen/service.js");
     const added: any[] = [];
-    const s1 = vi.spyOn(svc, "addAgentKnowledge").mockImplementation(async (_ws: any, _id: string, src: any) => { added.push(src); return { id: `ks_${added.length}`, name: src.name || src.url, kind: src.kind, state: "pending", url: src.url || null, failure: null, relation: "owned", updatedAt: null }; });
+    const s1 = vi.spyOn(svc, "addAgentKnowledge").mockImplementation(async (...args: any[]) => { const src = args[2]; added.push(src); return { id: `ks_${added.length}`, name: src.name || src.url, kind: src.kind, state: "pending", url: src.url || null, failure: null, relation: "owned", updatedAt: null }; });
     const s2 = vi.spyOn(svc, "listAgentKnowledge").mockResolvedValue([{ id: "ks_1", name: "acme.com", kind: "url", state: "ingesting", url: "https://acme.com", failure: null, relation: "owned", updatedAt: null }]);
     const { owner, orgId } = await setupOrg("Kb Heating", "ra_ok_kb_0123456789");
     const agent = await liveAgent(owner, orgId);
@@ -631,5 +631,50 @@ describe("campaign with hand-picked contacts, knowledge, website agents, custome
     expect(m.profile).toContain("Status: interested");
     expect(m.profile).toContain("Tags: vip");
     expect(m.context).toContain("Customer (SMS): Can you come Friday?");
+  });
+});
+
+describe("workspace knowledge library (Knowledge page)", () => {
+  it("adds a website for chosen agents, shows who uses it, and changes the agents", async () => {
+    const svc: any = await import("../server/voice/rasen/service.js");
+    const libs = new Map<string, Set<string>>();
+    const s1 = vi.spyOn(svc, "addWorkspaceKnowledge").mockResolvedValue({ id: "ks_site", name: "acme.com", kind: "url", state: "pending", url: "https://acme.com", failure: null, relation: null, updatedAt: null });
+    const s2 = vi.spyOn(svc, "listWorkspaceKnowledge").mockResolvedValue([{ id: "ks_site", name: "acme.com", kind: "url", state: "ready", url: "https://acme.com", failure: null, relation: null, updatedAt: null }]);
+    const s3 = vi.spyOn(svc, "attachKnowledge").mockImplementation(async (...a: any[]) => { libs.set(a[1], new Set([...(libs.get(a[1]) || []), a[2]])); });
+    const s4 = vi.spyOn(svc, "detachKnowledge").mockImplementation(async (...a: any[]) => { libs.get(a[1])?.delete(a[2]); });
+    const s5 = vi.spyOn(svc, "listAgentKnowledge").mockImplementation(async (...a: any[]) => [...(libs.get(a[1]) || [])].map((id) => ({ id, name: "acme.com", kind: "url", state: "ready", url: null, failure: null, relation: "shared", updatedAt: null })));
+    const { owner, orgId } = await setupOrg("Library Air", "ra_ok_lib_0123456789");
+    const a1 = await liveAgent(owner, orgId);
+    const c2 = await owner.agent.post("/api/agents").set(owner.csrf).send({ name: "Second", playbook: "inbound_booking" });
+    const r = await owner.agent.post("/api/knowledge").set(owner.csrf).send({ kind: "url", url: "https://acme.com", agentIds: [a1.id] });
+    expect(r.status).toBe(202);
+    let list = await owner.agent.get("/api/knowledge");
+    expect(list.body.sources[0].agents.map((x: any) => x.name)).toEqual(["Ava"]);
+    expect(list.body.agents.length).toBe(2);
+    expect((await owner.agent.put("/api/knowledge/ks_site/agents").set(owner.csrf).send({ agentIds: [c2.body.agent.id] })).status).toBe(200);
+    list = await owner.agent.get("/api/knowledge");
+    expect(list.body.sources[0].agents.map((x: any) => x.name)).toEqual(["Second"]);
+    for (const s of [s1, s2, s3, s4, s5]) s.mockRestore();
+  });
+});
+
+describe("deleting a contact purges what is theirs (like the CRM)", () => {
+  it("bookings, messages and leads go; the call stays unlinked and is never re-linked", async () => {
+    const { owner, orgId } = await setupOrg("Purge Cooling", "ra_ok_pg_0123456789");
+    const c = await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "Palak", phone: "+918707760368", stage: "lead" });
+    const id = c.body.customer.id;
+    const call = await one("INSERT INTO calls (org_id, provider_call_id, direction, customer_id, phone_e164, status, started_at, outcome) VALUES ($1, 'call_pg_1', 'outbound', $2, '+918707760368', 'ended', now(), 'booked') RETURNING id", [orgId, id]);
+    await q("INSERT INTO bookings (org_id, call_id, customer_id, connector, job_type, starts_at, ends_at) VALUES ($1, $2, $3, 'native', 'Meeting', now() + interval '1 day', now() + interval '1 day 1 hour')", [orgId, call!.id, id]);
+    await q("INSERT INTO messages (org_id, customer_id, phone_e164, direction, author, body, status) VALUES ($1, $2, '+918707760368', 'in', 'customer', 'hi', 'received')", [orgId, id]);
+    await q("INSERT INTO call_hints (org_id, provider_call_id, phone_e164, customer_id) VALUES ($1, 'call_pg_1', '+918707760368', $2)", [orgId, id]);
+    const d = await owner.agent.delete(`/api/customers/${id}`).set(owner.csrf);
+    expect(d.status).toBe(200);
+    expect(d.body.removed).toMatchObject({ bookings: 1, messages: 1, calls: 1 });
+    expect((await owner.agent.get("/api/bookings?from=2026-01-01&to=2030-01-01")).body.bookings.length).toBe(0);
+    expect(await one("SELECT customer_id, contact_purged FROM calls WHERE id = $1", [call!.id])).toMatchObject({ customer_id: null, contact_purged: true });
+    // A campaign sync for that call does not bring the contact back.
+    const { harvestCampaignHints } = await import("../server/modules/callHints.js");
+    await harvestCampaignHints(orgId, (await one("SELECT gen_random_uuid() AS id"))!.id, [{ to_e164: "+918707760368", attempts: [{ call_session_id: "call_pg_1" }] }]).catch(() => 0);
+    expect(await one("SELECT 1 AS x FROM customers WHERE org_id = $1 AND phone_e164 = '+918707760368'", [orgId])).toBeNull();
   });
 });

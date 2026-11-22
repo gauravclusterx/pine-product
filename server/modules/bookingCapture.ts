@@ -35,8 +35,8 @@ export function parseCapture(text: string): { action: string; service: string; d
 }
 
 export async function captureBookingFromCall(callId: string, chat?: ChatFn): Promise<"booked" | "rescheduled" | "cancelled" | "none" | "skipped"> {
-  const c = await one("SELECT id, org_id, customer_id, lead_id, transcript, status, extraction FROM calls WHERE id = $1", [callId]);
-  if (!c || c.status !== "ended" || !c.customer_id) return "skipped";
+  const c = await one("SELECT id, org_id, customer_id, lead_id, transcript, status, extraction, contact_purged FROM calls WHERE id = $1", [callId]);
+  if (!c || c.status !== "ended" || !c.customer_id || c.contact_purged) return "skipped";
   const lines: string[] = Array.isArray(c.transcript) ? c.transcript : [];
   const text = lines.join("\n");
   if (lines.length < 2 || !SIGNALS.test(text)) return "skipped";

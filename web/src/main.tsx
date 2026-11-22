@@ -28,6 +28,7 @@ const AdminCustomers = lazy(() => import("./pages/AdminBilling").then((m) => ({ 
 const AdminPayments = lazy(() => import("./pages/AdminBilling").then((m) => ({ default: m.AdminPayments })));
 const AdminSettings = lazy(() => import("./pages/AdminBilling").then((m) => ({ default: m.AdminSettings })));
 const BillingPage = lazy(() => import("./pages/Billing"));
+const KnowledgePage = lazy(() => import("./pages/Knowledge"));
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: false, retry: 1 } } });
 
@@ -45,6 +46,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route index element={<Dashboard />} />
                 <Route path="agents" element={<Agents />} />
                 <Route path="agents/:id" element={<AgentEditor />} />
+                <Route path="knowledge" element={<KnowledgePage />} />
                 <Route path="calls" element={<Calls />} />
                 <Route path="calls/:id" element={<CallDetail />} />
                 <Route path="leads" element={<Leads />} />

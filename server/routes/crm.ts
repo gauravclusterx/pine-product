@@ -21,6 +21,7 @@ import { audit, requireRole } from "../auth/auth.js";
 import { toE164 } from "../lib/phone.js";
 import { getCustomer, updateCustomer, upsertCustomer } from "../modules/customers.js";
 import { conversationFor } from "../modules/messages.js";
+import { purgeContact } from "../modules/contactPurge.js";
 import { sendSms } from "../hub/notify.js";
 import { getOrg } from "../modules/orgs.js";
 import { acceptLead, leadInputSchema, listLeads } from "../intake/leads.js";
@@ -111,10 +112,11 @@ crmRouter.patch("/customers/:id", manager, h(async (req, res) => {
 }));
 
 crmRouter.delete("/customers/:id", manager, h(async (req, res) => {
-  const r = await one("DELETE FROM customers WHERE org_id = $1 AND id = $2 RETURNING id", [req.auth!.orgId, parse(uuid, P(req).id)]);
+  const id = parse(uuid, P(req).id);
+  const r = await purgeContact(req.auth!.orgId, id);
   if (!r) throw notFound("Customer not found.");
-  await audit(req.auth!.orgId, req.auth!.userId, "customer.deleted", { customerId: r.id });
-  res.json({ ok: true });
+  await audit(req.auth!.orgId, req.auth!.userId, "customer.deleted", { customerId: id, ...r });
+  res.json({ ok: true, removed: r });
 }));
 
 crmRouter.get("/customers/:id/conversation", viewer, h(async (req, res) => {

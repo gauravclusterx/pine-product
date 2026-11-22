@@ -1306,6 +1306,40 @@ export async function refreshKnowledgeSource(input: any, sourceId: string): Prom
   return mapSource((await rasenRequest<any>(key, "POST", `/knowledge/sources/${enc(sourceId)}/reingest`, { ifMatch: cur.etag, timeoutMs: 60_000 })).data);
 }
 
+/** The workspace knowledge library (sources any agent can use). */
+export async function listWorkspaceKnowledge(input: any): Promise<KnowledgeSource[]> {
+  return (await rasenListAll(getRasenApiKey(input), "/knowledge/sources", {}, 500)).map(mapSource).filter((x: KnowledgeSource) => x.state !== "archived");
+}
+
+export async function addWorkspaceKnowledge(input: any, src: { kind: "url"; url: string; name?: string } | { kind: "text"; text: string; name: string }): Promise<KnowledgeSource> {
+  const body: Record<string, any> = src.kind === "url"
+    ? { kind: "url", url: src.url, name: (src.name || src.url).slice(0, 200), owner: { type: "workspace" } }
+    : { kind: "text", text: src.text.slice(0, 262_144), name: src.name.slice(0, 200), owner: { type: "workspace" } };
+  return mapSource((await rasenRequest<any>(getRasenApiKey(input), "POST", "/knowledge/sources", { body, timeoutMs: 60_000 })).data);
+}
+
+export async function uploadWorkspaceKnowledge(input: any, name: string, file: Buffer, filename: string): Promise<KnowledgeSource> {
+  const form = new FormData();
+  form.append("name", name.slice(0, 200));
+  form.append("owner_type", "workspace");
+  form.append("file", file, { filename });
+  return mapSource((await rasenRequest<any>(getRasenApiKey(input), "POST", "/knowledge/sources/upload", { body: form, headers: form.getHeaders(), timeoutMs: 120_000 })).data);
+}
+
+/** Use a workspace source in an agent's library. */
+export async function attachKnowledge(input: any, agentId: string, sourceId: string): Promise<void> {
+  await rasenRequest(getRasenApiKey(input), "PUT", `/agents/${enc(agentId)}/knowledge/sources/${enc(sourceId)}`, { timeoutMs: 60_000 });
+}
+
+export async function detachKnowledge(input: any, agentId: string, sourceId: string): Promise<void> {
+  await rasenRequest(getRasenApiKey(input), "DELETE", `/agents/${enc(agentId)}/knowledge/sources/${enc(sourceId)}`);
+}
+
+/** Stop using a source everywhere (archive keeps published calls' citations valid). */
+export async function archiveKnowledge(input: any, sourceId: string): Promise<void> {
+  await rasenRequest(getRasenApiKey(input), "POST", `/knowledge/sources/${enc(sourceId)}/archive`);
+}
+
 // ─── Versions ────────────────────────────────────────────────────────────────
 
 export async function listAgentVersions(input: any, agentId: string): Promise<Array<{ id: string; number: number; createdAt: string | null; live: boolean }>> {

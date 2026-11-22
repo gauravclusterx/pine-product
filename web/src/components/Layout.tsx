@@ -2,7 +2,7 @@ import { NavLink, Outlet, Navigate, useLocation } from "react-router-dom";
 import { ReactNode, useState } from "react";
 import {
   LayoutDashboard, Bot, PhoneCall, Users, Inbox, CalendarDays, Megaphone, Plug, Settings, Shield, LogOut, Menu, Phone, X,
-  Building2, Activity, ArrowLeftRight, Wallet, Receipt, SlidersHorizontal, type LucideIcon,
+  Building2, Activity, ArrowLeftRight, Wallet, Receipt, SlidersHorizontal, BookOpen, type LucideIcon,
 } from "lucide-react";
 import { useSession } from "../lib/session";
 import { Loading } from "./ui";
@@ -13,6 +13,7 @@ type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 const APP_NAV: NavItem[] = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/app/agents", label: "Agents", icon: Bot },
+  { to: "/app/knowledge", label: "Knowledge", icon: BookOpen },
   { to: "/app/calls", label: "Calls", icon: PhoneCall },
   { to: "/app/leads", label: "Leads", icon: Inbox },
   { to: "/app/customers", label: "Customers", icon: Users },

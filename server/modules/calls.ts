@@ -71,7 +71,8 @@ export async function ingestCall(m: MappedExecution, opts: { expectOrgId?: strin
   // Outbound calls placed by a campaign (or before our own row was written): the hint knows the number.
   const hint = phone ? null : await hintFor(org.id, m.id);
   if (hint) phone = hint.phone;
-  const customer = phone ? await upsertCustomer(org.id, { phone }) : null;
+  const purged = !!(await one("SELECT 1 AS x FROM calls WHERE org_id = $1 AND provider_call_id = $2 AND contact_purged", [org.id, m.id]));
+  const customer = phone && !purged ? await upsertCustomer(org.id, { phone }) : null;
   const outcome = outcomeOf(m);
   const ended = m.status === "ended";
   const extraction = m.extracted_data || {};
@@ -85,7 +86,7 @@ export async function ingestCall(m: MappedExecution, opts: { expectOrgId?: strin
       return { id: prev.id, created: false, charged: null as number | null, prevEnded: prev.status === "ended" };
     }
     const values = [
-      org.id, m.id, agent.id, direction, hint?.customerId || customer?.id || null, uuidOrNull(md.lead_id) || hint?.leadId || null, uuidOrNull(md.campaign_id) || hint?.campaignId || null, phone || "",
+      org.id, m.id, agent.id, direction, purged ? null : hint?.customerId || customer?.id || null, uuidOrNull(md.lead_id) || hint?.leadId || null, uuidOrNull(md.campaign_id) || hint?.campaignId || null, phone || "",
       m.status, m.ended_reason, m.created_at || new Date().toISOString(), m.ended_at, m.conversation_time,
       JSON.stringify(m.transcript ? m.transcript.split("\n") : []), m.summary || "", JSON.stringify(extraction),
       !!m.telephony_data.recording_url, outcome || null, providerUpdated, m.results_final,

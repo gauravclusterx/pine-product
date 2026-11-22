@@ -32,8 +32,8 @@ export async function hintFor(orgId: string, providerCallId: string): Promise<Hi
 export async function applyHintToCall(orgId: string, providerCallId: string): Promise<boolean> {
   const h = await hintFor(orgId, providerCallId);
   if (!h) return false;
-  const call = await one("SELECT id, phone_e164, customer_id, outcome, status FROM calls WHERE org_id = $1 AND provider_call_id = $2", [orgId, providerCallId]);
-  if (!call || (call.phone_e164 && call.customer_id)) return false;
+  const call = await one("SELECT id, phone_e164, customer_id, outcome, status, contact_purged FROM calls WHERE org_id = $1 AND provider_call_id = $2", [orgId, providerCallId]);
+  if (!call || call.contact_purged || (call.phone_e164 && call.customer_id)) return false;
   const customerId = h.customerId || (await upsertCustomer(orgId, { phone: h.phone })).id;
   await q(
     `UPDATE calls SET phone_e164 = CASE WHEN phone_e164 = '' THEN $3 ELSE phone_e164 END, customer_id = COALESCE(customer_id, $4),
@@ -56,6 +56,7 @@ export async function harvestCampaignHints(orgId: string, campaignId: string, re
     for (const at of Array.isArray(r?.attempts) ? r.attempts : []) {
       const callId = String(at?.call_session_id || at?.call_id || "");
       if (!callId) continue;
+      if (await one("SELECT 1 AS x FROM calls WHERE org_id = $1 AND provider_call_id = $2 AND contact_purged", [orgId, callId])) continue;
       await rememberHint(orgId, callId, { phone, customerId: customer?.id ?? null, campaignId });
       if (await applyHintToCall(orgId, callId)) linked++;
     }

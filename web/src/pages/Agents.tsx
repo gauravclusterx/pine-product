@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Plus , RefreshCw } from "lucide-react";
+import { Bot, Plus , RefreshCw, Globe } from "lucide-react";
 import { get, post } from "../lib/api";
 import { when } from "../lib/format";
 import { useSession } from "../lib/session";
@@ -12,13 +12,15 @@ export default function Agents() {
   const [open, setOpen] = useState(false);
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => get("/agents") });
   const playbooks = useQuery({ queryKey: ["playbooks"], queryFn: () => get("/playbooks") });
+  const [fromWeb, setFromWeb] = useState(false);
   const qcSync = useQueryClient();
   const sync = useMutation({ mutationFn: () => post("/agents/sync"), onSuccess: () => qcSync.invalidateQueries({ queryKey: ["agents"] }) });
   return (
     <div>
       <PageHeader title="Agents" subtitle="Each agent is built for this business from one of our playbooks. Publish an agent to let it take and make calls." actions={can("manager") && <>
         <button className="btn-line" disabled={sync.isPending} onClick={() => sync.mutate()}><RefreshCw className={`h-4 w-4 ${sync.isPending ? "animate-spin" : ""}`} /> Sync from Rasen</button>
-        <button className="btn-primary" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New agent</button>
+        <button className="btn-line" onClick={() => { setFromWeb(true); setOpen(true); }}><Globe className="h-4 w-4" /> Agent from website</button>
+        <button className="btn-primary" onClick={() => { setFromWeb(false); setOpen(true); }}><Plus className="h-4 w-4" /> New agent</button>
       </>} />
       {sync.data && <div className="mb-4 rounded-xl bg-leaf-wash text-leaf text-sm px-3 py-2">Synced with Rasen: {sync.data.remote} agent(s) in your workspace, {sync.data.added} added, {sync.data.updated} updated.</div>}
       <ErrorNote error={sync.error} />
@@ -40,12 +42,12 @@ export default function Agents() {
           ))}
         </div>
       )}
-      <NewAgent open={open} onClose={() => setOpen(false)} playbooks={playbooks.data?.playbooks || {}} />
+      <NewAgent key={String(fromWeb)} open={open} onClose={() => setOpen(false)} playbooks={playbooks.data?.playbooks || {}} fromWebsite={fromWeb} />
     </div>
   );
 }
 
-function NewAgent({ open, onClose, playbooks }: { open: boolean; onClose: () => void; playbooks: Record<string, any> }) {
+function NewAgent({ open, onClose, playbooks, fromWebsite = false }: { open: boolean; onClose: () => void; playbooks: Record<string, any>; fromWebsite?: boolean }) {
   const [name, setName] = useState("Ava");
   const [playbook, setPlaybook] = useState("inbound_booking");
   const [website, setWebsite] = useState("");
@@ -57,10 +59,10 @@ function NewAgent({ open, onClose, playbooks }: { open: boolean; onClose: () => 
   });
   const submit = (e: FormEvent) => { e.preventDefault(); m.mutate(); };
   return (
-    <Modal open={open} onClose={onClose} title="New agent" wide>
+    <Modal open={open} onClose={onClose} title={fromWebsite ? "Agent from your website" : "New agent"} wide>
       <form onSubmit={submit} className="space-y-4">
         <Field label="Name the agent introduces itself with"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={60} /></Field>
-        <Field label="Your website (optional)" hint="The agent reads it and answers callers from it; it goes live by itself once the site is read."><input className="input" type="url" placeholder="https://yourbusiness.com" value={website} onChange={(e) => setWebsite(e.target.value)} /></Field>
+        <Field label={fromWebsite ? "Your website" : "Your website (optional)"} hint="The agent reads it and answers callers from it; it goes live by itself once the site is read."><input className="input" type="url" placeholder="https://yourbusiness.com" value={website} onChange={(e) => setWebsite(e.target.value)} required={fromWebsite} autoFocus={fromWebsite} /></Field>
         <div>
           <span className="label">Playbook</span>
           <div className="grid sm:grid-cols-2 gap-2">
