@@ -13,6 +13,7 @@ import { getPool } from "./db/pool.js";
 import { queueStats } from "./queue/queue.js";
 import { log } from "./lib/logger.js";
 import { isTest } from "./config.js";
+import { mountLanding } from "./landing.js";
 
 export function buildApp() {
   const app = express();
@@ -43,6 +44,9 @@ export function buildApp() {
       res.status(503).json({ status: "degraded", db: "down" });
     }
   });
+
+  // The marketing site and its lead form come first; the app owns everything else.
+  mountLanding(app);
 
   app.use("/api", publicRouter);
   app.use("/api", apiRouter);

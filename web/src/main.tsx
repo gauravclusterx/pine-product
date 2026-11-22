@@ -4,9 +4,8 @@ import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./index.css";
 import { SessionProvider } from "./lib/session";
-import { AppLayout } from "./components/Layout";
+import { AdminLayout, AppLayout } from "./components/Layout";
 import { Loading } from "./components/ui";
-import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -22,7 +21,9 @@ const Campaigns = lazy(() => import("./pages/Campaigns"));
 const Numbers = lazy(() => import("./pages/Numbers"));
 const Integrations = lazy(() => import("./pages/Integrations"));
 const SettingsPage = lazy(() => import("./pages/Settings"));
-const Admin = lazy(() => import("./pages/Admin"));
+const AdminOverview = lazy(() => import("./pages/Admin").then((m) => ({ default: m.AdminOverview })));
+const AdminClients = lazy(() => import("./pages/Admin").then((m) => ({ default: m.AdminClients })));
+const AdminSystem = lazy(() => import("./pages/Admin").then((m) => ({ default: m.AdminSystem })));
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: false, retry: 1 } } });
 
@@ -33,7 +34,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <SessionProvider>
           <Suspense fallback={<Loading />}>
             <Routes>
-              <Route path="/" element={<Landing />} />
+              <Route path="/" element={<Navigate to="/app" replace />} />
               <Route path="/login" element={<Login />} />
               <Route path="/app" element={<AppLayout />}>
                 <Route index element={<Dashboard />} />
@@ -49,9 +50,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="numbers" element={<Numbers />} />
                 <Route path="integrations" element={<Integrations />} />
                 <Route path="settings" element={<SettingsPage />} />
-                <Route path="admin" element={<Admin />} />
+                <Route path="admin" element={<Navigate to="/admin" replace />} />
               </Route>
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="/admin" element={<AdminLayout />}>
+                <Route index element={<AdminOverview />} />
+                <Route path="clients" element={<AdminClients />} />
+                <Route path="system" element={<AdminSystem />} />
+              </Route>
+              <Route path="*" element={<Navigate to="/app" replace />} />
             </Routes>
           </Suspense>
         </SessionProvider>

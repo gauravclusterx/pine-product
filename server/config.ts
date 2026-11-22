@@ -25,6 +25,15 @@ const schema = z.object({
   /** Optional: an LLM key for QA scoring. Without it QA uses the built-in rules only. */
   OPENAI_API_KEY: z.string().default(""),
   LOG_LEVEL: z.string().default("info"),
+  /** Google sign-in (the only sign-in method outside tests). */
+  GOOGLE_CLIENT_ID: z.string().default(""),
+  GOOGLE_CLIENT_SECRET: z.string().default(""),
+  /** Staff domains: any verified Google email on these signs in as platform staff. */
+  GOOGLE_ALLOWED_DOMAINS: z.string().default("clusterx.ai,rasen.ai"),
+  /** Extra public origins the app is served from (comma separated), e.g. a preview domain. */
+  APP_ORIGINS: z.string().default(""),
+  /** Where the landing page lead form is stored and emailed (the landing site worker). */
+  LANDING_LEAD_URL: z.string().default(""),
 });
 
 export type Config = z.infer<typeof schema>;

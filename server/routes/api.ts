@@ -19,12 +19,15 @@ import { placeCall } from "../modules/outbound.js";
 import { getCustomer, updateCustomer } from "../modules/customers.js";
 import { acceptLead, leadInputSchema, listLeads } from "../intake/leads.js";
 import * as campaigns from "../modules/campaigns.js";
-import { dashboard, platformUsage, usage } from "../modules/stats.js";
+import { dashboard, platformOverview, platformUsage, usage } from "../modules/stats.js";
 import { translateCall, translationAvailable } from "../modules/translate.js";
 import { CHANNELS, CRM_CONNECTORS, connectorContext, deleteIntegration, listIntegrations, markIntegration, rotateInboundKey, saveIntegration, saveIntegrationSchema } from "../hub/registry.js";
 import { queueStats, DeferJob, PermanentJobError } from "../queue/queue.js";
 import * as rasen from "../voice/rasen/service.js";
-import { publicBaseUrl } from "../config.js";
+import { isProd, isTest, publicBaseUrl } from "../config.js";
+import crypto from "node:crypto";
+import { log } from "../lib/logger.js";
+import { STATE_COOKIE, allowedDomains, authUrl, decideSignIn, fetchGoogleProfile, googleConfigured, newState, requestOrigin } from "../auth/google.js";
 
 export const apiRouter = Router();
 const org = (req: Request) => getOrg(req.auth!.orgId);
@@ -39,7 +42,49 @@ function throttleLogin(key: string): void {
   attempts.set(key, { n: a && a.until > now ? a.n + 1 : 1, until: a && a.until > now ? a.until : now + 10 * 60_000 });
 }
 
+// Google is the only sign-in. GET /auth/google starts it; Google returns to the callback.
+apiRouter.get("/auth/google", (req, res) => {
+  if (!googleConfigured()) return res.redirect("/login?error=not_configured");
+  const state = newState();
+  res.cookie(STATE_COOKIE, state, { httpOnly: true, sameSite: "lax", secure: isProd, path: "/api/auth/google", maxAge: 10 * 60_000 });
+  res.redirect(authUrl(requestOrigin(req), state));
+});
+
+apiRouter.get("/auth/google/callback", async (req, res) => {
+  const fail = (reason: string) => res.redirect(`/login?error=${encodeURIComponent(reason)}`);
+  try {
+    const state = String(req.query.state || "");
+    const expected = String((req as any).cookies?.[STATE_COOKIE] || "");
+    res.clearCookie(STATE_COOKIE, { path: "/api/auth/google" });
+    if (req.query.error) return fail("cancelled");
+    if (!state || !expected || state.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(state), Buffer.from(expected))) return fail("expired");
+    const g = await fetchGoogleProfile(String(req.query.code || ""), requestOrigin(req));
+    let user = await one("SELECT * FROM users WHERE lower(email) = lower($1)", [g.email]);
+    const d = decideSignIn(g, user ? { disabled: !!user.disabled } : null);
+    if (!d.ok) return fail(d.reason);
+    if (!user) {
+      // Staff on an allowed domain: first sign-in creates the account. It has no usable password.
+      user = await one("INSERT INTO users (email, name, password_hash, is_platform_admin) VALUES ($1, $2, $3, true) RETURNING *", [g.email, g.name, "google-only"]);
+      await audit(null, user!.id, "user.created_by_google", { email: g.email });
+    } else if (d.staff && !user.is_platform_admin) {
+      await q("UPDATE users SET is_platform_admin = true WHERE id = $1", [user.id]);
+    }
+    await q("UPDATE users SET last_login_at = now(), name = CASE WHEN name = '' THEN $2 ELSE name END WHERE id = $1", [user!.id, g.name]);
+    setSessionCookie(res, signSession(user!.id, user!.token_version));
+    res.redirect(d.staff ? "/admin" : "/app");
+  } catch (err) {
+    log.warn({ err: (err as Error).message }, "google sign-in failed");
+    fail("google_failed");
+  }
+});
+
+apiRouter.get("/auth/options", (_req, res) => {
+  res.json({ google: googleConfigured(), domains: allowedDomains() });
+});
+
+// Password sign-in exists only for the automated tests.
 apiRouter.post("/auth/login", h(async (req, res) => {
+  if (!isTest) throw notFound();
   const { email, password } = parse(z.object({ email: z.string().email().max(200), password: z.string().min(1).max(200) }), req.body);
   throttleLogin(`${req.ip}:${email.toLowerCase()}`);
   const user = await one("SELECT * FROM users WHERE lower(email) = lower($1)", [email]);
@@ -66,6 +111,7 @@ apiRouter.get("/auth/me", h(async (req, res) => {
 }));
 
 apiRouter.post("/auth/password", h(async (req, res) => {
+  if (!isTest) throw notFound();
   const { current, next } = parse(z.object({ current: z.string(), next: z.string() }), req.body);
   const problem = passwordProblem(next);
   if (problem) throw badRequest(problem);
@@ -97,7 +143,8 @@ apiRouter.post("/admin/orgs", requirePlatformAdmin, h(async (req, res) => {
     if (existing) (input as any).existing = true;
   });
   await audit(o.id, req.auth!.userId, "org.created", { name: o.name });
-  res.status(201).json({ org: o, owner: { email: input.ownerEmail, tempPassword: (input as any).existing ? null : tempPassword } });
+  // No password is handed out: the owner signs in with Google using this email.
+  res.status(201).json({ org: o, owner: { email: input.ownerEmail, existing: !!(input as any).existing } });
 }));
 
 apiRouter.put("/admin/orgs/:id/voice-key", requirePlatformAdmin, h(async (req, res) => {
@@ -132,6 +179,12 @@ apiRouter.put("/admin/orgs/:id/status", requirePlatformAdmin, h(async (req, res)
 apiRouter.get("/admin/usage", requirePlatformAdmin, h(async (req, res) => {
   const { from, to } = monthRange(String(req.query.month || ""));
   res.json({ from, to, orgs: await platformUsage(from, to) });
+}));
+
+apiRouter.get("/admin/overview", requirePlatformAdmin, h(async (req, res) => {
+  const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+  const to = new Date();
+  res.json(await platformOverview(new Date(to.getTime() - days * 86_400_000), to));
 }));
 
 apiRouter.get("/admin/queue", requirePlatformAdmin, h(async (_req, res) => {
@@ -176,7 +229,7 @@ apiRouter.post("/org/members", owner, h(async (req, res) => {
   const user = (await one("SELECT id FROM users WHERE lower(email) = lower($1)", [email])) || (await one("INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3) RETURNING id", [email, name, await hashPassword(temp)]));
   const created = !(await one("SELECT 1 AS x FROM memberships WHERE org_id = $1 AND user_id = $2", [req.auth!.orgId, user!.id]));
   await q("INSERT INTO memberships (org_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role", [req.auth!.orgId, user!.id, role]);
-  res.status(201).json({ ok: true, tempPassword: created ? temp : null });
+  res.status(201).json({ ok: true, created: !!created });
 }));
 
 apiRouter.delete("/org/members/:userId", owner, h(async (req, res) => {

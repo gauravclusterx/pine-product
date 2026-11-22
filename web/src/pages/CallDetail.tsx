@@ -53,7 +53,7 @@ export default function CallDetail() {
                   const ai = /^AI:/i.test(l);
                   return (
                     <div key={i} className={`flex ${ai ? "justify-end" : "justify-start"}`}>
-                      <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${ai ? "bg-ink text-white rounded-tr-sm" : "bg-canvas rounded-tl-sm"}`}>{l.replace(/^(AI|Customer):\s*/i, "")}</div>
+                      <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${ai ? "bg-leaf-wash text-ink rounded-tr-sm" : "bg-white/[0.06] rounded-tl-sm"}`}>{l.replace(/^(AI|Customer):\s*/i, "")}</div>
                     </div>
                   );
                 })}

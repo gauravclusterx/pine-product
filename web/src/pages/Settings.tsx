@@ -153,7 +153,7 @@ function Team() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("manager");
   const [temp, setTemp] = useState<string | null>(null);
-  const add = useMutation({ mutationFn: () => post("/org/members", { email, role }), onSuccess: (r: any) => { setTemp(r.tempPassword); setEmail(""); qc.invalidateQueries({ queryKey: ["members"] }); } });
+  const add = useMutation({ mutationFn: () => post("/org/members", { email, role }), onSuccess: () => { setTemp(email); setEmail(""); qc.invalidateQueries({ queryKey: ["members"] }); } });
   const rm = useMutation({ mutationFn: (id: string) => del(`/org/members/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   return (
     <section className="card p-5 mt-4">
@@ -171,7 +171,7 @@ function Team() {
           <button className="btn-primary">Add</button>
         </form>
       )}
-      {temp && <div className="mt-3 rounded-xl bg-warn-wash text-warn text-sm px-3 py-2">Temporary password (shown once): <code className="font-mono">{temp}</code></div>}
+      {temp && <div className="mt-3 rounded-xl bg-leaf-wash text-leaf text-sm px-3 py-2">{temp} was added. They sign in with Google using this email — no password needed.</div>}
       <ErrorNote error={add.error || rm.error} />
     </section>
   );

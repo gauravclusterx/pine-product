@@ -70,7 +70,7 @@ function NewCampaign({ open, onClose }: { open: boolean; onClose: () => void }) 
           <span className="label">Who to call</span>
           <div className="grid sm:grid-cols-2 gap-2">
             {Object.entries(KINDS).map(([k, v]) => (
-              <button type="button" key={k} onClick={() => setF({ ...f, kind: k })} className={`text-left rounded-xl border p-3 ${f.kind === k ? "border-leaf bg-leaf-wash" : "border-canvas-line bg-white hover:bg-canvas-tint"}`}>
+              <button type="button" key={k} onClick={() => setF({ ...f, kind: k })} className={`text-left rounded-xl border p-3 ${f.kind === k ? "border-leaf bg-leaf-wash" : "border-canvas-line bg-white/[0.03] hover:bg-canvas-tint"}`}>
                 <div className="text-sm font-medium">{v.label}</div><div className="text-xs text-ink-mute">{v.body}</div>
               </button>
             ))}

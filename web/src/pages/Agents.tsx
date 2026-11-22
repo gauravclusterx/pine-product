@@ -56,7 +56,7 @@ function NewAgent({ open, onClose, playbooks }: { open: boolean; onClose: () => 
           <span className="label">Playbook</span>
           <div className="grid sm:grid-cols-2 gap-2">
             {Object.entries(playbooks).map(([k, p]: any) => (
-              <button type="button" key={k} onClick={() => setPlaybook(k)} className={`text-left rounded-xl border p-3 ${playbook === k ? "border-leaf bg-leaf-wash" : "border-canvas-line bg-white hover:bg-canvas-tint"}`}>
+              <button type="button" key={k} onClick={() => setPlaybook(k)} className={`text-left rounded-xl border p-3 ${playbook === k ? "border-leaf bg-leaf-wash" : "border-canvas-line bg-white/[0.03] hover:bg-canvas-tint"}`}>
                 <div className="text-sm font-medium flex items-center justify-between">{p.label}<span className="text-[10px] uppercase tracking-wide text-ink-mute">{p.direction}</span></div>
                 <div className="text-xs text-ink-mute mt-0.5">{p.summary}</div>
               </button>

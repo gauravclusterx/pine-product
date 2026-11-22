@@ -33,7 +33,7 @@ export const OUTCOME_LABEL: Record<string, string> = {
 };
 
 export const OUTCOME_TONE: Record<string, string> = {
-  booked: "bg-leaf-wash text-leaf-dark", callback: "bg-plum-wash text-plum", quote: "bg-plum-wash text-plum", transferred: "bg-canvas-deep text-ink-soft",
+  booked: "bg-leaf-wash text-leaf", callback: "bg-plum-wash text-plum", quote: "bg-plum-wash text-plum", transferred: "bg-canvas-deep text-ink-soft",
   no_contact: "bg-canvas-deep text-ink-mute", not_interested: "bg-warn-wash text-warn", opt_out: "bg-bad-wash text-bad", info: "bg-canvas-deep text-ink-soft", unknown: "bg-canvas-deep text-ink-mute",
 };
 
@@ -50,3 +50,13 @@ export const clockToMinutes = (s: string) => {
   const [h, m] = s.split(":").map(Number);
   return (h || 0) * 60 + (m || 0);
 };
+
+/** Compact money for big numbers: $212.4k, $1.2M. */
+export function moneyShort(cents: number | null | undefined): string {
+  if (cents == null) return "—";
+  const v = cents / 100;
+  const a = Math.abs(v);
+  if (a >= 1_000_000) return `$${(v / 1_000_000).toFixed(a >= 10_000_000 ? 0 : 1).replace(/\.0$/, "")}M`;
+  if (a >= 1_000) return `$${(v / 1_000).toFixed(a >= 100_000 ? 0 : 1).replace(/\.0$/, "")}k`;
+  return `$${Math.round(v)}`;
+}
