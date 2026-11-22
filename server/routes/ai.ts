@@ -13,6 +13,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { badRequest } from "../lib/errors.js";
+import { enqueue } from "../queue/queue.js";
 import { h, P, parse, uuid } from "../http.js";
 import { audit, requirePlatformAdmin, requireRole } from "../auth/auth.js";
 import {
@@ -62,6 +63,7 @@ aiRouter.put("/admin/ai-keys", requirePlatformAdmin, h(async (req, res) => {
   const b = parse(body, req.body);
   const { patch, warnings } = await checkAndPatch(b, await platformKeyStatus());
   await setPlatformKeys(patch);
+  if (patch.openaiKey || patch.anthropicKey) await enqueue("ai.backfill", {}, { dedupeKey: `ai-backfill:all:${Math.floor(Date.now() / 60_000)}` });
   await audit(null, req.auth!.userId, "admin.ai_keys_changed", { scope: "platform", openaiKey: b.openaiKey !== undefined, anthropicKey: b.anthropicKey !== undefined, openaiModel: b.openaiModel, anthropicModel: b.anthropicModel });
   res.json({ ...(await platformKeyStatus()), warnings, models: { openai: OPENAI_MODELS, anthropic: ANTHROPIC_MODELS } });
 }));
@@ -75,6 +77,7 @@ aiRouter.put("/admin/customers/:id/ai-keys", requirePlatformAdmin, h(async (req,
   const b = parse(body, req.body);
   const { patch, warnings } = await checkAndPatch(b, await orgKeyStatus(id));
   await setOrgKeys(id, patch);
+  if (patch.openaiKey || patch.anthropicKey) await enqueue("ai.backfill", { orgId: id }, { orgId: id, dedupeKey: `ai-backfill:${id}:${Math.floor(Date.now() / 60_000)}` });
   await audit(id, req.auth!.userId, "admin.ai_keys_changed", { scope: "customer", openaiKey: b.openaiKey !== undefined, anthropicKey: b.anthropicKey !== undefined, openaiModel: b.openaiModel, anthropicModel: b.anthropicModel });
   res.json({ ...(await orgKeyStatus(id)), warnings, models: { openai: OPENAI_MODELS, anthropic: ANTHROPIC_MODELS } });
 }));

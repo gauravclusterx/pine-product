@@ -544,3 +544,29 @@ describe("AI call analysis (like the CRM's analyzeTranscript)", () => {
     expect(await one("SELECT name, status FROM customers WHERE id = $1", [c.body.customer.id])).toMatchObject({ name: "Palak", status: "booked" });
   });
 });
+
+describe("booking capture from a call (like the CRM's bookingCapture)", () => {
+  it("a call where a meeting was agreed (and moved) becomes one booking at the final time", async () => {
+    const { captureBookingFromCall, parseCapture } = await import("../server/modules/bookingCapture.js");
+    expect(parseCapture('{"action":"book","service":"Meeting","dateISO":"2026-11-24","time":"17:30","address":"","notes":""}')).toMatchObject({ action: "book", dateISO: "2026-11-24", time: "17:30" });
+    expect(parseCapture('{"action":"maybe"}')).toBeNull();
+    const { owner, orgId } = await setupOrg("Capture Cooling", "ra_ok_cap_0123456789");
+    await q("UPDATE orgs SET timezone = 'Asia/Kolkata' WHERE id = $1", [orgId]);
+    await admin.agent.put(`/api/admin/customers/${orgId}/ai-keys`).set(admin.csrf).send({ openaiKey: "sk-abcdefghijklmnopqrstuvwx7777", skipTest: true });
+    const c = await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "Palak", phone: "+918707760367", stage: "lead" });
+    const call = await one(
+      "INSERT INTO calls (org_id, provider_call_id, direction, customer_id, phone_e164, status, started_at, transcript, outcome) VALUES ($1, 'call_cap_1', 'outbound', $2, '+918707760367', 'ended', now(), $3, 'unknown') RETURNING id",
+      [orgId, c.body.customer.id, JSON.stringify(["AI: Shall I book a meeting?", "Customer: Yes, 26th December 2 PM.", "Customer: Actually make it tomorrow 5:30 PM.", "AI: Booked for tomorrow at 5:30 PM."])]
+    );
+    const stub = async () => '{"action":"book","service":"Meeting","dateISO":"2026-11-24","time":"17:30","address":"","notes":"moved from 26 Dec"}';
+    expect(await captureBookingFromCall(call!.id, stub)).toBe("booked");
+    const b = await one("SELECT job_type, starts_at, status, customer_id FROM bookings WHERE call_id = $1", [call!.id]);
+    expect(b).toMatchObject({ job_type: "Meeting", status: "booked", customer_id: c.body.customer.id });
+    expect(new Date(b!.starts_at).toISOString()).toBe("2026-11-24T12:00:00.000Z"); // 17:30 IST
+    expect((await one("SELECT stage, status FROM customers WHERE id = $1", [c.body.customer.id]))).toMatchObject({ stage: "customer", status: "booked" });
+    // Running again never makes a second booking for the same call.
+    expect(await captureBookingFromCall(call!.id, stub)).toBe("skipped");
+    const list = await owner.agent.get("/api/bookings?from=2026-11-01&to=2026-12-31");
+    expect(list.body.bookings.map((x: any) => x.customer_name)).toContain("Palak");
+  });
+});

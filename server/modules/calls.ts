@@ -16,6 +16,7 @@ import { scoreCall } from "./qa.js";
 import { chargeUpTo, creditsForSeconds } from "./billing.js";
 import { hintFor } from "./callHints.js";
 import { analyseCall } from "./callAnalysis.js";
+import { captureBookingFromCall } from "./bookingCapture.js";
 
 const NO_CONTACT = new Set(["busy", "no_answer", "rejected", "invalid_number", "carrier_failed", "never_connected", "voicemail"]);
 
@@ -166,6 +167,8 @@ async function afterCallEnded(orgId: string, callId: string): Promise<void> {
 export async function finaliseCall(callId: string): Promise<void> {
   // No usable outcome from the agent (e.g. an agent synced from Rasen): classify the transcript with AI, like the CRM.
   await analyseCall(callId);
+  // The agent said it booked but its tool did not record it: capture the booking from the call (CRM bookingCapture).
+  await captureBookingFromCall(callId);
   const c = await one("SELECT c.*, o.name AS org_name FROM calls c JOIN orgs o ON o.id = c.org_id WHERE c.id = $1", [callId]);
   if (!c) return;
   const transcript = Array.isArray(c.transcript) ? c.transcript.join("\n") : "";

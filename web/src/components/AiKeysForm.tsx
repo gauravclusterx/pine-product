@@ -47,7 +47,8 @@ export function AiKeysForm({ endpoint, note }: { endpoint: string; note?: string
         {d.anthropic.set && <button className="btn-ghost btn-sm" onClick={async () => (await ask({ title: "Remove the Anthropic key?", body: "AI features fall back to the next key that is set.", confirmLabel: "Remove", danger: true })) && save.mutate({ anthropicKey: "" })}>Remove Anthropic key</button>}
         {saved && <span className="text-xs text-leaf">Saved ✓</span>}
         {(q.data?.warnings || []).map((w: string) => <span key={w} className="text-xs text-warn">{w}</span>)}
-        {d.serverKey && <span className="text-xs text-ink-mute">A server OpenAI key is also set (used last).</span>}
+        {d.serverKey && <span className="text-xs text-ink-mute">A server OpenAI key is also set (used after these).</span>}
+        {d.serverGemini && <span className="text-xs text-ink-mute">Server Gemini fallback is on (used last, like the CRM).</span>}
         {d.usesPlatform && <span className="text-xs text-ink-mute">No own key — uses the platform keys.</span>}
       </div>
       <ErrorNote error={save.error} />

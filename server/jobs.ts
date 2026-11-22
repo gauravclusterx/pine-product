@@ -15,6 +15,8 @@ import { createWorker, enqueue, PermanentJobError, type Handler, type Worker } f
 import { getOrg, findOrg, leadAgentFor } from "./modules/orgs.js";
 import { placeCall } from "./modules/outbound.js";
 import { finaliseCall, ingestCall } from "./modules/calls.js";
+import { analyseCall } from "./modules/callAnalysis.js";
+import { captureBookingFromCall } from "./modules/bookingCapture.js";
 import { leadVariables } from "./intake/leads.js";
 import { acceptLead } from "./intake/leads.js";
 import { fromLsaRow, LSA_QUERY } from "./intake/sources.js";
@@ -55,6 +57,17 @@ export const handlers: Record<string, Handler> = {
   },
 
   "call.finalise": async (job) => { await finaliseCall(job.payload.callId); },
+
+  /** After an AI key is saved: analyse the last week's calls that have no outcome or no captured booking. */
+  "ai.backfill": async (job) => {
+    const rows = await q(
+      `SELECT c.id FROM calls c WHERE c.status = 'ended' AND jsonb_array_length(c.transcript) > 1 AND c.started_at > now() - interval '7 days'
+         AND ($1::uuid IS NULL OR c.org_id = $1) AND (c.outcome IS NULL OR c.outcome IN ('unknown','booked'))
+         AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.call_id = c.id) ORDER BY c.started_at DESC LIMIT 200`,
+      [job.payload.orgId || null]
+    );
+    for (const r of rows) { await analyseCall(r.id); await captureBookingFromCall(r.id); }
+  },
 
   "voice.suppress": async (job) => {
     const ws = await findVoiceWorkspace(job.orgId!);
