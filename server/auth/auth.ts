@@ -84,7 +84,8 @@ export async function authenticate(req: Request): Promise<AuthContext> {
   const user = await one("SELECT id, email, name, is_platform_admin, token_version, disabled FROM users WHERE id = $1", [claims.sub]);
   if (!user || user.disabled || user.token_version !== claims.tv) throw unauthorized("Your session has expired. Sign in again.");
 
-  const wanted = String(req.headers["x-org-id"] || "").trim();
+  // Media elements (<audio src>) cannot send headers, so a GET may name the workspace in ?org=.
+  const wanted = String(req.headers["x-org-id"] || (req.method === "GET" ? req.query.org : "") || "").trim();
   let orgId = "";
   let role: Role = "viewer";
   if (wanted) {

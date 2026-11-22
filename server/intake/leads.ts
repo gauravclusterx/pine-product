@@ -101,7 +101,7 @@ export async function listLeads(orgId: string, f: { status?: string; source?: st
   if (f.source) { params.push(f.source); where.push(`l.source = $${params.length}`); }
   params.push(limit, offset);
   return q(
-    `SELECT l.id, l.source, l.name, l.phone_e164, l.service, l.postal_code, l.status, l.reject_reason, l.received_at, l.first_call_at, l.attempts,
+    `SELECT l.id, l.source, l.name, l.phone_e164, l.email, l.message, l.customer_id, l.service, l.postal_code, l.status, l.reject_reason, l.received_at, l.first_call_at, l.attempts,
             EXTRACT(EPOCH FROM (l.first_call_at - l.received_at))::int AS seconds_to_call
      FROM leads l WHERE ${where.join(" AND ")} ORDER BY l.received_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params

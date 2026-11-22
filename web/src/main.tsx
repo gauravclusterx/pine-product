@@ -15,7 +15,7 @@ const Calls = lazy(() => import("./pages/Calls"));
 const CallDetail = lazy(() => import("./pages/CallDetail"));
 const Leads = lazy(() => import("./pages/Leads"));
 const Customers = lazy(() => import("./pages/Customers"));
-const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
+const CustomerDetail = lazy(() => import("./pages/Customers").then((m) => ({ default: m.CustomerPage })));
 const Bookings = lazy(() => import("./pages/Bookings"));
 const Campaigns = lazy(() => import("./pages/Campaigns"));
 const Numbers = lazy(() => import("./pages/Numbers"));

@@ -28,9 +28,11 @@ vi.mock("../server/voice/rasen/service.js", async (importOriginal) => {
     getCallUsageSeconds: vi.fn(async () => 95),
     createOutboundCall: vi.fn(async (_ws: any, args: any) => { calls.push(args); return { id: `call_out_${calls.length}`, status: "queued", state: "admitted" }; }),
     suppressDestination: vi.fn(async () => {}),
+    createCampaignFromCsv: vi.fn(async (_ws: any, _agent: string, csv: Buffer) => { campaignCsvs.push(csv.toString("utf8")); return { id: `camp_${campaignCsvs.length}` }; }),
   };
 });
 
+const campaignCsvs: string[] = [];
 const { buildApp } = await import("../server/app.js");
 const app = buildApp();
 const SECRET = () => process.env.RASEN_WEBHOOK_SECRET!;
@@ -340,5 +342,100 @@ describe("subscription paywall and billing", () => {
     expect(one_.body.members[0]).toMatchObject({ role: "owner" });
     const list = await admin.agent.get("/api/admin/customers");
     expect(list.body.customers.find((c: any) => c.id === orgId)).toMatchObject({ wallet_voice: 55, wallet_chat: 20 });
+  });
+});
+
+describe("CRM: contacts, leads, conversation, campaigns, manual calls", () => {
+  it("adds, lists by type, edits (status locks), and deletes contacts", async () => {
+    const { owner } = await setupOrg("Crm Cooling", "ra_ok_m_0123456789");
+    const a = await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "Riya", phone: "+919811100001", stage: "lead" });
+    expect(a.status).toBe(201);
+    const b = await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "Kabir", phone: "+919811100002", stage: "customer" });
+    expect(b.status).toBe(201);
+    expect((await owner.agent.post("/api/customers").set(owner.csrf).send({ phone: "+919811100001" })).status).toBe(400);
+    const leads = await owner.agent.get("/api/customers?stage=lead");
+    expect(leads.body.customers.map((c: any) => c.name)).toEqual(["Riya"]);
+    const custs = await owner.agent.get("/api/customers?stage=customer");
+    expect(custs.body.customers.map((c: any) => c.name)).toEqual(["Kabir"]);
+    const id = a.body.customer.id;
+    const e = await owner.agent.patch(`/api/customers/${id}`).set(owner.csrf).send({ name: "Riya S", email: "riya@x.in", status: "interested", tags: ["vip"], notes: "gate 4" });
+    expect(e.status).toBe(200);
+    expect(e.body.customer).toMatchObject({ name: "Riya S", email: "riya@x.in", status: "interested", statusLocked: true, tags: ["vip"], notes: "gate 4" });
+    // A call outcome never overwrites a status a person set; it does update an unlocked one.
+    const { setStatusFromCall } = await import("../server/modules/customers.js");
+    await setStatusFromCall(id, "no_contact");
+    expect((await one("SELECT status FROM customers WHERE id = $1", [id]))!.status).toBe("interested");
+    await setStatusFromCall(b.body.customer.id, "callback");
+    expect((await one("SELECT status FROM customers WHERE id = $1", [b.body.customer.id]))!.status).toBe("callback");
+    expect((await owner.agent.get("/api/customers?q=vip")).body.customers.length).toBe(1);
+    expect((await owner.agent.delete(`/api/customers/${id}`).set(owner.csrf)).status).toBe(200);
+    expect((await owner.agent.get(`/api/customers/${id}`)).status).toBe(404);
+  });
+
+  it("a booking turns a lead into a customer", async () => {
+    const { orgId, owner } = await setupOrg("Stage Plumbing", "ra_ok_s_0123456789");
+    const a = await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "Lead", phone: "+919811100003", stage: "lead" });
+    await q("INSERT INTO bookings (org_id, customer_id, connector, job_type, starts_at, ends_at) VALUES ($1, $2, 'native', 'Repair', now(), now() + interval '1 hour')", [orgId, a.body.customer.id]);
+    expect((await one("SELECT stage FROM customers WHERE id = $1", [a.body.customer.id]))!.stage).toBe("customer");
+  });
+
+  it("edits and deletes a lead; the conversation shows calls and messages", async () => {
+    const { orgId, owner } = await setupOrg("Lead Edit Air", "ra_ok_l_0123456789");
+    const l = await owner.agent.post("/api/leads").set(owner.csrf).send({ name: "Old", phone: "+12125550188", service: "AC" });
+    expect(l.status).toBe(201);
+    const lead = (await owner.agent.get("/api/leads")).body.leads[0];
+    const p = await owner.agent.patch(`/api/leads/${lead.id}`).set(owner.csrf).send({ name: "New Name", status: "lost", message: "call after 5" });
+    expect(p.status).toBe(200);
+    expect(p.body.lead).toMatchObject({ name: "New Name", status: "lost", message: "call after 5" });
+    const cust = await one("SELECT id, name FROM customers WHERE org_id = $1 AND phone_e164 = '+12125550188'", [orgId]);
+    expect(cust!.name).toBe("New Name");
+    await q("INSERT INTO messages (org_id, customer_id, phone_e164, direction, author, body, status) VALUES ($1, $2, '+12125550188', 'in', 'customer', 'hello?', 'received')", [orgId, cust!.id]);
+    const conv = await owner.agent.get(`/api/customers/${cust!.id}/conversation`);
+    expect(conv.status).toBe(200);
+    expect(conv.body.items[0]).toMatchObject({ type: "sms", body: "hello?" });
+    expect((await owner.agent.delete(`/api/leads/${lead.id}`).set(owner.csrf)).status).toBe(200);
+    expect((await owner.agent.get("/api/leads")).body.leads.length).toBe(0);
+  });
+
+  it("a campaign calls CRM leads by status once consent is confirmed", async () => {
+    const { owner, orgId } = await setupOrg("Camp Heating", "ra_ok_c2_0123456789");
+    const agent = await liveAgent(owner, orgId, "speed_to_lead");
+    await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "A", phone: "+12125550191", stage: "lead", status: "interested" });
+    await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "B", phone: "+12125550192", stage: "lead", status: "lost" });
+    const noConsent = await owner.agent.post("/api/campaigns").set(owner.csrf).send({ name: "Interested", kind: "contacts", stage: "lead", status: "interested", agentId: agent.id, consentConfirmed: false });
+    expect(noConsent.status).toBe(400);
+    expect(noConsent.body.error.message).toMatch(/without consent/);
+    const ok = await owner.agent.post("/api/campaigns").set(owner.csrf).send({ name: "Interested", kind: "contacts", stage: "lead", status: "interested", agentId: agent.id, consentConfirmed: true });
+    expect(ok.status).toBe(201);
+    expect(ok.body.campaign).toMatchObject({ status: "running", recipient_count: 1 });
+    expect(campaignCsvs[campaignCsvs.length - 1]).toContain("+12125550191");
+    expect(campaignCsvs[campaignCsvs.length - 1]).not.toContain("+12125550192");
+    const csv = await owner.agent.post("/api/campaigns").set(owner.csrf).send({ name: "List", kind: "custom", csv: "phone,name\n+12125550193,C", agentId: agent.id, consentConfirmed: true });
+    expect(csv.status).toBe(201);
+  });
+
+  it("a person pressing Call is not held by the calling window", async () => {
+    const { owner, orgId } = await setupOrg("Night Owl HVAC", "ra_ok_n_0123456789");
+    const agent = await liveAgent(owner, orgId, "speed_to_lead");
+    // A one-minute window at 08:00 local time: closed for practically the whole test run.
+    await q(`UPDATE orgs SET settings = jsonb_set(settings, '{callingWindow}', '{"opens": 480, "closes": 481}') WHERE id = $1`, [orgId]);
+    const before = calls.length;
+    const r = await owner.agent.post("/api/calls").set(owner.csrf).send({ agentId: agent.id, phone: "+12125550194" });
+    expect(r.status).toBe(202);
+    expect(calls.length).toBe(before + 1);
+  });
+
+  it("admins set AI keys; keys are never returned", async () => {
+    const r = await admin.agent.put("/api/admin/ai-keys").set(admin.csrf).send({ openaiKey: "sk-abcdefghijklmnopqrstuvwx1234", openaiModel: "gpt-4o", skipTest: true });
+    expect(r.status).toBe(200);
+    expect(r.body.openai).toEqual({ set: true, last4: "1234", model: "gpt-4o" });
+    expect(JSON.stringify(r.body)).not.toContain("abcdefghij");
+    expect((await admin.agent.put("/api/admin/ai-keys").set(admin.csrf).send({ openaiKey: "not-a-key-at-all-xxxxxxxx", skipTest: true })).status).toBe(400);
+    const { owner, orgId } = await setupOrg("Key Cooling", "ra_ok_k_0123456789");
+    expect((await owner.agent.put("/api/admin/ai-keys").set(owner.csrf).send({ openaiModel: "gpt-4o" })).status).toBe(403);
+    const c = await admin.agent.put(`/api/admin/customers/${orgId}/ai-keys`).set(admin.csrf).send({ anthropicKey: "sk-ant-abcdefghijklmnopqrstuv9876", anthropicModel: "claude-opus-5-5", skipTest: true });
+    expect(c.body.anthropic).toEqual({ set: true, last4: "9876", model: "claude-opus-5-5" });
+    expect((await owner.agent.get("/api/ai/status")).body.available).toBe(true);
+    await admin.agent.put("/api/admin/ai-keys").set(admin.csrf).send({ openaiKey: "", skipTest: true });
   });
 });

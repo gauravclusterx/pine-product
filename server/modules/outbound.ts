@@ -47,9 +47,13 @@ export async function placeCall(org: Org, input: PlaceCallInput): Promise<{ prov
   if (!input.manual && org.settings.speedToLead.requireConsent && !customer?.consentAt) {
     throw new PermanentJobError("no consent to call this number on record");
   }
-  const w = org.settings.callingWindow;
-  const when = nextCallableTime(now, org.timezone, w.opens, w.closes);
-  if (when.getTime() > now.getTime()) throw new DeferJob(when.getTime() - now.getTime(), "outside the calling window");
+  // The calling window governs automated dialling (leads, campaigns, retries). A person pressing
+  // "Call" in the app chooses the moment themselves.
+  if (!input.manual) {
+    const w = org.settings.callingWindow;
+    const when = nextCallableTime(now, org.timezone, w.opens, w.closes);
+    if (when.getTime() > now.getTime()) throw new DeferJob(when.getTime() - now.getTime(), "outside the calling window");
+  }
 
   const agent = await getAgent(org.id, input.agentId);
   if (agent.status !== "live" || !agent.providerAgentId) throw new PermanentJobError(`agent "${agent.name}" is not live`);

@@ -18,7 +18,7 @@ import { buildCustomerMemory, toCustomer, upsertCustomer } from "./customers.js"
 import type { Org } from "./orgs.js";
 import { requireVoiceWorkspace } from "./voiceWorkspace.js";
 
-export const CAMPAIGN_KINDS = ["estimate_followup", "membership_renewal", "reactivation", "after_job", "reminder", "custom"] as const;
+export const CAMPAIGN_KINDS = ["estimate_followup", "membership_renewal", "reactivation", "after_job", "reminder", "custom", "contacts"] as const;
 
 export const createCampaignSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -33,6 +33,11 @@ export const createCampaignSchema = z.object({
   maxAttemptsPerRecipient: z.number().int().min(1).max(5).default(2),
   /** Start now (default) or only create and plan it. */
   start: z.boolean().default(true),
+  /** For kind "contacts": leads/customers from the CRM, optionally by status. */
+  stage: z.enum(["lead", "customer", "all"]).default("all"),
+  status: z.string().max(40).default(""),
+  /** The person creating the campaign confirms everyone on the list agreed to be called; it is recorded as their consent. */
+  consentConfirmed: z.boolean().default(false),
 });
 
 interface Recipient { phone: string; customerId: string | null; variables: Record<string, string> }
@@ -73,6 +78,12 @@ export async function selectRecipients(org: Org, input: z.infer<typeof createCam
         [org.id, now]
       );
       break;
+    case "contacts":
+      rows = await q(
+        "SELECT * FROM customers WHERE org_id = $1 AND ($2 = 'all' OR stage = $2) AND ($3 = '' OR status = $3) ORDER BY updated_at DESC LIMIT 20000",
+        [org.id, input.stage, input.status]
+      );
+      break;
     case "custom": {
       if (!input.csv) throw badRequest("Upload a CSV with a phone column.");
       const parsed: Record<string, string>[] = parseCsv(input.csv, { columns: true, skip_empty_lines: true, trim: true, bom: true });
@@ -81,7 +92,7 @@ export async function selectRecipients(org: Org, input: z.infer<typeof createCam
         const phone = toE164(r.phone || r.contact_number || r.number || r.phone_number || "", org.settings.defaultCountryCode);
         if (!phone) continue;
         const name = r.name || r.full_name || [r.first_name, r.last_name].filter(Boolean).join(" ");
-        const consent = /^(yes|true|1|y)$/i.test(String(r.consent || ""));
+        const consent = input.consentConfirmed || /^(yes|true|1|y)$/i.test(String(r.consent || ""));
         const c = await upsertCustomer(org.id, { phone, name, email: r.email, consentAt: consent ? now : null, consentSource: consent ? "csv" : null });
         const vars: Record<string, string> = {};
         for (const [k, v] of Object.entries(r)) if (/^[a-z][a-z0-9_]{0,40}$/.test(k) && v && !["phone", "contact_number", "number", "phone_number", "consent"].includes(k)) vars[k] = String(v).slice(0, 500);
@@ -104,6 +115,10 @@ export async function createCampaign(org: Org, userId: string | null, input: z.i
   const agent = await getAgent(org.id, input.agentId);
   if (agent.status !== "live" || !agent.providerAgentId) throw conflict("Publish the agent before using it in a campaign.");
   const all = await selectRecipients(org, input, now);
+  if (input.consentConfirmed) {
+    const ids = all.map((r) => r.customerId).filter(Boolean);
+    await q("UPDATE customers SET consent_at = COALESCE(consent_at, now()), consent_source = COALESCE(consent_source, 'campaign_confirmation') WHERE org_id = $1 AND id = ANY($2::uuid[])", [org.id, ids]);
+  }
   // Rules the provider cannot know: our DNC list and the consent the law requires for automated calls.
   const dnc = new Set((await q("SELECT phone_e164 FROM dnc_list WHERE org_id = $1", [org.id])).map((r) => r.phone_e164));
   const consented = new Set(

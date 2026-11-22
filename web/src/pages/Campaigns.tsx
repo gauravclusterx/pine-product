@@ -7,6 +7,7 @@ import { useSession } from "../lib/session";
 import { Empty, ErrorNote, Field, Loading, Modal, PageHeader, StatusChip } from "../components/ui";
 
 const KINDS: Record<string, { label: string; body: string }> = {
+  contacts: { label: "Leads / customers in the CRM", body: "Pick by type and status — e.g. every lead marked Interested." },
   estimate_followup: { label: "Estimate follow-up", body: "Customers with an open estimate in your CRM." },
   membership_renewal: { label: "Membership renewal", body: "Plans ending in the next 45 days." },
   reactivation: { label: "Reactivation", body: "Past customers with no job for a while." },
@@ -58,9 +59,11 @@ export default function Campaigns() {
 function NewCampaign({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => get("/agents"), enabled: open });
-  const [f, setF] = useState<any>({ name: "", kind: "estimate_followup", agentId: "", csv: "", inactiveMonths: 12, start: true });
+  const [f, setF] = useState<any>({ name: "", kind: "contacts", agentId: "", csv: "", inactiveMonths: 12, start: true, stage: "all", status: "", consentConfirmed: true });
+  const statuses = useQuery({ queryKey: ["customers", "statuses"], queryFn: () => get("/customers?limit=1"), enabled: open });
   const m = useMutation({ mutationFn: () => post("/campaigns", { ...f, csv: f.kind === "custom" ? f.csv : undefined }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); onClose(); } });
-  const live = (agents.data?.agents || []).filter((a: any) => a.status === "live");
+  const all = (agents.data?.agents || []).filter((a: any) => a.status !== "archived");
+  const live = all.filter((a: any) => a.status === "live");
   const submit = (e: FormEvent) => { e.preventDefault(); m.mutate(); };
   return (
     <Modal open={open} onClose={onClose} title="New campaign" wide>
@@ -81,10 +84,17 @@ function NewCampaign({ open, onClose }: { open: boolean; onClose: () => void }) 
             <input type="file" accept=".csv,text/csv" className="text-sm" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setF({ ...f, csv: await file.text() }); }} />
           </Field>
         )}
+        {f.kind === "contacts" && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="From the CRM"><select className="input" value={f.stage} onChange={(e) => setF({ ...f, stage: e.target.value })}><option value="all">Leads and customers</option><option value="lead">Leads only</option><option value="customer">Customers only</option></select></Field>
+            <Field label="With status"><select className="input" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">Any status</option>{(statuses.data?.statuses || []).map((x: string) => <option key={x} value={x}>{x.replace(/_/g, " ")}</option>)}</select></Field>
+          </div>
+        )}
+        {(f.kind === "custom" || f.kind === "contacts") && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-leaf h-4 w-4" checked={f.consentConfirmed} onChange={(e) => setF({ ...f, consentConfirmed: e.target.checked })} /> Everyone on this list agreed to be called (recorded as their consent)</label>}
         {f.kind === "reactivation" && <Field label="No job for at least (months)"><input type="number" className="input w-32" min={1} max={60} value={f.inactiveMonths} onChange={(e) => setF({ ...f, inactiveMonths: Number(e.target.value) })} /></Field>}
-        <Field label="Agent" hint={!live.length ? "Publish an outbound agent first." : undefined}>
+        <Field label="Agent" hint={!all.length ? "Create an agent in Agents first." : !live.length ? "Your agents are drafts — open the agent and press Publish, then pick it here." : "Only published agents can call."}>
           <select className="input" value={f.agentId} onChange={(e) => setF({ ...f, agentId: e.target.value })} required>
-            <option value="">Choose…</option>{live.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            <option value="">Choose…</option>{all.map((a: any) => <option key={a.id} value={a.id} disabled={a.status !== "live"}>{a.name}{a.status !== "live" ? " — draft, publish first" : ""}</option>)}
           </select>
         </Field>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-leaf h-4 w-4" checked={f.start} onChange={(e) => setF({ ...f, start: e.target.checked })} /> Start calling now (inside your calling hours)</label>
