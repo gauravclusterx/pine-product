@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Plus } from "lucide-react";
+import { Bot, Plus , RefreshCw } from "lucide-react";
 import { get, post } from "../lib/api";
 import { when } from "../lib/format";
 import { useSession } from "../lib/session";
@@ -12,9 +12,16 @@ export default function Agents() {
   const [open, setOpen] = useState(false);
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => get("/agents") });
   const playbooks = useQuery({ queryKey: ["playbooks"], queryFn: () => get("/playbooks") });
+  const qcSync = useQueryClient();
+  const sync = useMutation({ mutationFn: () => post("/agents/sync"), onSuccess: () => qcSync.invalidateQueries({ queryKey: ["agents"] }) });
   return (
     <div>
-      <PageHeader title="Agents" subtitle="Each agent is built for this business from one of our playbooks." actions={can("manager") && <button className="btn-primary" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New agent</button>} />
+      <PageHeader title="Agents" subtitle="Each agent is built for this business from one of our playbooks. Publish an agent to let it take and make calls." actions={can("manager") && <>
+        <button className="btn-line" disabled={sync.isPending} onClick={() => sync.mutate()}><RefreshCw className={`h-4 w-4 ${sync.isPending ? "animate-spin" : ""}`} /> Sync from Rasen</button>
+        <button className="btn-primary" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New agent</button>
+      </>} />
+      {sync.data && <div className="mb-4 rounded-xl bg-leaf-wash text-leaf text-sm px-3 py-2">Synced with Rasen: {sync.data.remote} agent(s) in your workspace, {sync.data.added} added, {sync.data.updated} updated.</div>}
+      <ErrorNote error={sync.error} />
       {agents.isLoading ? <Loading /> : agents.error ? <ErrorNote error={agents.error} /> : !agents.data.agents.length ? (
         <Empty title="No agents yet" body="Start with an inbound booking agent: it answers your number and books jobs." action={can("manager") && <button className="btn-leaf" onClick={() => setOpen(true)}>Create the first agent</button>} />
       ) : (

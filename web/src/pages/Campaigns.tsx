@@ -5,6 +5,7 @@ import { get, post } from "../lib/api";
 import { when } from "../lib/format";
 import { useSession } from "../lib/session";
 import { Empty, ErrorNote, Field, Loading, Modal, PageHeader, StatusChip } from "../components/ui";
+import { useConfirm } from "../components/Confirm";
 
 const KINDS: Record<string, { label: string; body: string }> = {
   contacts: { label: "Leads / customers in the CRM", body: "Pick by type and status — e.g. every lead marked Interested." },
@@ -17,6 +18,7 @@ const KINDS: Record<string, { label: string; body: string }> = {
 };
 
 export default function Campaigns() {
+  const ask = useConfirm();
   const { can } = useSession();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -37,13 +39,13 @@ export default function Campaigns() {
                 <td className="td tabular-nums">{c.recipient_count}{(c.skipped?.do_not_call || c.skipped?.no_consent) ? <div className="text-xs text-ink-mute">{c.skipped.do_not_call} DNC · {c.skipped.no_consent} no consent skipped</div> : null}</td>
                 <td className="td tabular-nums">{c.calls}</td>
                 <td className="td tabular-nums text-leaf-dark">{c.booked}</td>
-                <td className="td"><StatusChip status={c.status} /></td>
+                <td className="td"><StatusChip status={c.status} /><CampaignProgress c={c} /></td>
                 <td className="td text-right whitespace-nowrap">{can("manager") && (
                   <>
                     {c.status === "running" && <button className="btn-ghost btn-sm" onClick={() => cmd.mutate({ id: c.id, c: "pause" })} title="Pause"><Pause className="h-4 w-4" /></button>}
                     {c.status === "paused" && <button className="btn-ghost btn-sm" onClick={() => cmd.mutate({ id: c.id, c: "resume" })} title="Resume"><Play className="h-4 w-4" /></button>}
                     {c.status === "scheduled" && <button className="btn-ghost btn-sm" onClick={() => cmd.mutate({ id: c.id, c: "start" })} title="Start"><Play className="h-4 w-4" /></button>}
-                    {["running", "paused", "scheduled"].includes(c.status) && <button className="btn-ghost btn-sm text-bad" onClick={() => { if (confirm("Cancel this campaign?")) cmd.mutate({ id: c.id, c: "cancel" }); }} title="Cancel"><Square className="h-4 w-4" /></button>}
+                    {["running", "paused", "scheduled"].includes(c.status) && <button className="btn-ghost btn-sm text-bad" onClick={async () => { if (await ask({ title: "Cancel this campaign?", body: "Nobody else on the list is called. Calls already made stay in the call log.", confirmLabel: "Cancel campaign", cancelLabel: "Keep it", danger: true })) cmd.mutate({ id: c.id, c: "cancel" }); }} title="Cancel"><Square className="h-4 w-4" /></button>}
                   </>
                 )}</td>
               </tr>
@@ -59,9 +61,10 @@ export default function Campaigns() {
 function NewCampaign({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => get("/agents"), enabled: open });
-  const [f, setF] = useState<any>({ name: "", kind: "contacts", agentId: "", csv: "", inactiveMonths: 12, start: true, stage: "all", status: "", consentConfirmed: true });
+  const [f, setF] = useState<any>({ name: "", kind: "contacts", agentId: "", csv: "", inactiveMonths: 12, start: true, stage: "all", status: "", consentConfirmed: true, limitHours: false, opens: "09:00", closes: "20:00" });
   const statuses = useQuery({ queryKey: ["customers", "statuses"], queryFn: () => get("/customers?limit=1"), enabled: open });
-  const m = useMutation({ mutationFn: () => post("/campaigns", { ...f, csv: f.kind === "custom" ? f.csv : undefined }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); onClose(); } });
+  const toMin = (t: string) => { const [h, m] = t.split(":").map(Number); return (h || 0) * 60 + (m || 0); };
+  const m = useMutation({ mutationFn: () => { const { limitHours, opens, closes, ...rest } = f; return post("/campaigns", { ...rest, csv: f.kind === "custom" ? f.csv : undefined, callingHours: limitHours ? { opens: toMin(opens), closes: toMin(closes) } : undefined }); }, onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); onClose(); } });
   const all = (agents.data?.agents || []).filter((a: any) => a.status !== "archived");
   const live = all.filter((a: any) => a.status === "live");
   const submit = (e: FormEvent) => { e.preventDefault(); m.mutate(); };
@@ -97,10 +100,38 @@ function NewCampaign({ open, onClose }: { open: boolean; onClose: () => void }) 
             <option value="">Choose…</option>{all.map((a: any) => <option key={a.id} value={a.id} disabled={a.status !== "live"}>{a.name}{a.status !== "live" ? " — draft, publish first" : ""}</option>)}
           </select>
         </Field>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-leaf h-4 w-4" checked={f.start} onChange={(e) => setF({ ...f, start: e.target.checked })} /> Start calling now (inside your calling hours)</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-leaf h-4 w-4" checked={f.start} onChange={(e) => setF({ ...f, start: e.target.checked })} /> Start calling now</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-leaf h-4 w-4" checked={f.limitHours} onChange={(e) => setF({ ...f, limitHours: e.target.checked })} /> Only call during set hours</label>
+        {f.limitHours && (
+          <div className="flex items-center gap-2 text-sm text-ink-soft pl-6">
+            <input type="time" className="input w-32" value={f.opens} onChange={(e) => setF({ ...f, opens: e.target.value })} aria-label="From" /> to
+            <input type="time" className="input w-32" value={f.closes} onChange={(e) => setF({ ...f, closes: e.target.value })} aria-label="To" />
+            <span className="text-xs text-ink-mute">your business time zone</span>
+          </div>
+        )}
         <ErrorNote error={m.error} />
         <div className="flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn-primary" disabled={m.isPending}>{m.isPending ? "Preparing…" : "Create campaign"}</button></div>
       </form>
     </Modal>
+  );
+}
+
+/** Live progress from the voice provider, and why nothing is dialling yet. */
+function CampaignProgress({ c }: { c: any }) {
+  const r = c.progress?.recipients;
+  const w = c.calling_window || {};
+  let waiting = "";
+  if (c.status === "running" && w.opensMinute != null && w.closesMinute != null) {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: w.timezone || undefined, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date()).split(":").map(Number);
+    const now = parts[0] * 60 + parts[1];
+    const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    if (now < w.opensMinute || now >= w.closesMinute) waiting = `Waiting for calling hours — calls start at ${hhmm(w.opensMinute)} (${w.timezone})`;
+  }
+  if (!r && !waiting) return null;
+  return (
+    <div className="text-xs text-ink-mute mt-1 space-y-0.5">
+      {r && <div>{r.pending ?? 0} waiting · {r.dialing ?? 0} dialling · {r.reached ?? 0} reached{r.exhausted ? ` · ${r.exhausted} no answer` : ""}</div>}
+      {waiting && <div className="text-warn">{waiting}</div>}
+    </div>
   );
 }

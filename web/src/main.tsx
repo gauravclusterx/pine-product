@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./index.css";
 import { SessionProvider } from "./lib/session";
+import { ConfirmProvider } from "./components/Confirm";
 import { AdminLayout, AppLayout } from "./components/Layout";
 import { Loading } from "./components/ui";
 import Login from "./pages/Login";
@@ -35,6 +36,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={qc}>
       <BrowserRouter>
         <SessionProvider>
+          <ConfirmProvider>
           <Suspense fallback={<Loading />}>
             <Routes>
               <Route path="/" element={<Navigate to="/app" replace />} />
@@ -67,6 +69,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route path="*" element={<Navigate to="/app" replace />} />
             </Routes>
           </Suspense>
+          </ConfirmProvider>
         </SessionProvider>
       </BrowserRouter>
     </QueryClientProvider>

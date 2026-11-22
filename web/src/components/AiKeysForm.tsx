@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound } from "lucide-react";
 import { get, put } from "../lib/api";
 import { ErrorNote, Field, Loading } from "./ui";
+import { useConfirm } from "./Confirm";
 
 export function AiKeysForm({ endpoint, note }: { endpoint: string; note?: string }) {
   const qc = useQueryClient();
@@ -13,6 +14,7 @@ export function AiKeysForm({ endpoint, note }: { endpoint: string; note?: string
   const [oModel, setOModel] = useState<string | null>(null);
   const [aModel, setAModel] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const ask = useConfirm();
   const save = useMutation({
     mutationFn: (body: any) => put(endpoint, body),
     onSuccess: (d) => { qc.setQueryData(["ai-keys", endpoint], d); setOKey(""); setAKey(""); setSaved(true); setTimeout(() => setSaved(false), 2500); },
@@ -41,8 +43,8 @@ export function AiKeysForm({ endpoint, note }: { endpoint: string; note?: string
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn-primary btn-sm" disabled={save.isPending} onClick={() => save.mutate(body)}><KeyRound className="h-3.5 w-3.5" /> {save.isPending ? "Checking key…" : "Save AI keys"}</button>
-        {d.openai.set && <button className="btn-ghost btn-sm" onClick={() => confirm("Remove the OpenAI key?") && save.mutate({ openaiKey: "" })}>Remove OpenAI key</button>}
-        {d.anthropic.set && <button className="btn-ghost btn-sm" onClick={() => confirm("Remove the Anthropic key?") && save.mutate({ anthropicKey: "" })}>Remove Anthropic key</button>}
+        {d.openai.set && <button className="btn-ghost btn-sm" onClick={async () => (await ask({ title: "Remove the OpenAI key?", body: "AI features fall back to the next key that is set.", confirmLabel: "Remove", danger: true })) && save.mutate({ openaiKey: "" })}>Remove OpenAI key</button>}
+        {d.anthropic.set && <button className="btn-ghost btn-sm" onClick={async () => (await ask({ title: "Remove the Anthropic key?", body: "AI features fall back to the next key that is set.", confirmLabel: "Remove", danger: true })) && save.mutate({ anthropicKey: "" })}>Remove Anthropic key</button>}
         {saved && <span className="text-xs text-leaf">Saved ✓</span>}
         {d.serverKey && <span className="text-xs text-ink-mute">A server OpenAI key is also set (used last).</span>}
         {d.usesPlatform && <span className="text-xs text-ink-mute">No own key — uses the platform keys.</span>}

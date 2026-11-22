@@ -13,6 +13,7 @@ import { useSession } from "../lib/session";
 import { ErrorNote, Field, Loading, Modal, PageHeader, StatusChip, Toggle } from "../components/ui";
 import { NewClient, VoiceKey } from "./Admin";
 import { AiKeysForm } from "../components/AiKeysForm";
+import { useConfirm } from "../components/Confirm";
 
 const subTone = (c: any) => (c.suspended ? "failed" : c.active ? (c.subscription_status === "trial" ? "scheduled" : "active") : c.subscription_status === "inactive" ? "draft" : "paused");
 const subLabel = (c: any) => (c.suspended ? "suspended" : c.active ? c.subscription_status : c.subscription_status === "inactive" ? "no plan" : "expired");
@@ -78,6 +79,7 @@ function CustomerPanel({ id, onClose }: { id: string; onClose: () => void }) {
   const [paid, setPaid] = useState("");
   const [cv, setCv] = useState("");
   const [cc, setCc] = useState("");
+  const ask = useConfirm();
   if (q.isLoading) return <Modal open onClose={onClose} title="Customer" wide><Loading /></Modal>;
   if (q.error) return <Modal open onClose={onClose} title="Customer" wide><ErrorNote error={q.error} /></Modal>;
   const { org, billing: b, members, payments, ledger, voice, usage } = q.data;
@@ -105,7 +107,7 @@ function CustomerPanel({ id, onClose }: { id: string; onClose: () => void }) {
             <Field label={`Amount received (${b.currency}, optional)`}><input className="input" type="number" min={0} value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
             <button className="btn-primary h-10" onClick={() => m.mutate(() => post(`/admin/customers/${id}/activate`, { months, amount: Number(paid) || 0 }))}>Activate</button>
           </div>
-          {b.active && <button className="btn-ghost btn-sm mt-3 text-bad" onClick={() => confirm("End this customer's plan now?") && m.mutate(() => patch(`/admin/customers/${id}/billing`, { endSubscription: true }))}>End plan now</button>}
+          {b.active && <button className="btn-ghost btn-sm mt-3 text-bad" onClick={async () => (await ask({ title: "End this customer's plan now?", body: "With the paywall on, they will see the plan page until they pay again.", confirmLabel: "End plan", danger: true })) && m.mutate(() => patch(`/admin/customers/${id}/billing`, { endSubscription: true }))}>End plan now</button>}
         </Section>
 
         <Section title="Credits (prepaid wallet)">

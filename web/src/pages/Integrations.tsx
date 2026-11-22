@@ -5,6 +5,7 @@ import { del, get, post, put } from "../lib/api";
 import { ago } from "../lib/format";
 import { useSession } from "../lib/session";
 import { ErrorNote, Field, Loading, Modal, PageHeader, StatusChip } from "../components/ui";
+import { useConfirm } from "../components/Confirm";
 
 const GROUPS: Record<string, string> = { schedule: "Dispatch, schedule & CRM", leads: "Lead sources", messaging: "Messaging", alerts: "Team alerts" };
 
@@ -66,6 +67,7 @@ export default function Integrations() {
 }
 
 function Connect({ spec, row, endpoint, isCrm, onClose }: { spec: any; row: any; endpoint?: string; isCrm: boolean; onClose: () => void }) {
+  const ask = useConfirm();
   const { can } = useSession();
   const qc = useQueryClient();
   const [creds, setCreds] = useState<Record<string, string>>({});
@@ -111,7 +113,7 @@ function Connect({ spec, row, endpoint, isCrm, onClose }: { spec: any; row: any;
         {save.isSuccess && !inboundKey && <div className="rounded-xl bg-leaf-wash text-leaf-dark text-sm px-3 py-2">Saved.</div>}
         {can("manager") && (
           <div className="flex flex-wrap justify-end gap-2">
-            {row && can("owner") && <button type="button" className="btn-ghost text-bad mr-auto" onClick={() => { if (confirm(`Disconnect ${spec.label}?`)) remove.mutate(); }}>Disconnect</button>}
+            {row && can("owner") && <button type="button" className="btn-ghost text-bad mr-auto" onClick={async () => { if (await ask({ title: `Disconnect ${spec.label}?`, body: "Agents stop using it until you connect it again.", confirmLabel: "Disconnect", danger: true })) remove.mutate(); }}>Disconnect</button>}
             {row && isSchedule && <button type="button" className="btn-line" onClick={() => test.mutate()} disabled={test.isPending}>{test.isPending ? "Testing…" : "Test connection"}</button>}
             {isSchedule && (row || spec.kind === "native") && !isCrm && <button type="button" className="btn-line" onClick={() => useAsCrm.mutate()}>Use as schedule system</button>}
             {spec.kind !== "native" && <button className="btn-primary" disabled={save.isPending}>{save.isPending ? "Saving…" : row ? "Save" : "Connect"}</button>}

@@ -439,3 +439,40 @@ describe("CRM: contacts, leads, conversation, campaigns, manual calls", () => {
     await admin.agent.put("/api/admin/ai-keys").set(admin.csrf).send({ openaiKey: "", skipTest: true });
   });
 });
+
+describe("one dialling gate everywhere (credits + subscription)", () => {
+  it("a campaign is refused with no voice credits, and with a lapsed plan when the paywall is on", async () => {
+    const { owner, orgId } = await setupOrg("Gate Air", "ra_ok_g_0123456789");
+    const agent = await liveAgent(owner, orgId, "speed_to_lead");
+    await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "G", phone: "+12125550181", stage: "lead" });
+    const body = { name: "Gate", kind: "contacts", stage: "all", agentId: agent.id, consentConfirmed: true };
+    await q("UPDATE orgs SET wallet_voice = 0 WHERE id = $1", [orgId]);
+    const none = await owner.agent.post("/api/campaigns").set(owner.csrf).send(body);
+    expect(none.status).toBe(402);
+    expect(none.body.error.message).toMatch(/voice credits/);
+    const call = await owner.agent.post("/api/calls").set(owner.csrf).send({ agentId: agent.id, phone: "+12125550182" });
+    expect(call.status).toBe(400);
+    expect(call.body.error.message).toMatch(/voice credits/);
+    await q("UPDATE orgs SET wallet_voice = 50, subscription_status = 'expired', subscription_expires_at = now() - interval '1 day' WHERE id = $1", [orgId]);
+    await admin.agent.put("/api/admin/settings").set(admin.csrf).send({ paywallEnabled: true });
+    expect((await owner.agent.post("/api/campaigns").set(owner.csrf).send(body)).status).toBe(402);
+    await admin.agent.put("/api/admin/settings").set(admin.csrf).send({ paywallEnabled: false });
+    expect((await owner.agent.post("/api/campaigns").set(owner.csrf).send(body)).status).toBe(201);
+  });
+
+  it("agents made in the Rasen workspace are synced in", async () => {
+    const svc: any = await import("../server/voice/rasen/service.js");
+    const { owner, orgId } = await setupOrg("Sync Cooling", "ra_ok_y_0123456789");
+    const spy = vi.spyOn(svc, "listMappedAgents").mockResolvedValue([
+      { id: "agent_remote_live", agent_name: "Maya", agent_status: "active", description: "", live: true },
+      { id: "agent_remote_draft", agent_name: "Draft One", agent_status: "draft", description: "", live: false },
+    ]);
+    const r = await owner.agent.post("/api/agents/sync").set(owner.csrf);
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ added: 2, remote: 2 });
+    const rows = await q("SELECT name, status FROM agents WHERE org_id = $1 ORDER BY name", [orgId]);
+    expect(rows).toEqual([{ name: "Draft One", status: "draft" }, { name: "Maya", status: "live" }]);
+    expect((await owner.agent.post("/api/agents/sync").set(owner.csrf)).body).toMatchObject({ added: 0 });
+    spy.mockRestore();
+  });
+});

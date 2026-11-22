@@ -297,6 +297,33 @@ apiRouter.get("/playbooks", viewer, (_req, res) => { res.json({ playbooks: PLAYB
 
 apiRouter.get("/agents", viewer, h(async (req, res) => { res.json({ agents: await agents.listAgents(req.auth!.orgId) }); }));
 
+// Agents made directly in the Rasen workspace appear here too (the CRM's agent sync). New ones are
+// added as "custom" agents with their live state; agents already here are left as they are.
+apiRouter.post("/agents/sync", manager, h(async (req, res) => {
+  const ws = await requireVoiceWorkspace(req.auth!.orgId);
+  const remote = await rasen.listMappedAgents(ws);
+  let added = 0, updated = 0;
+  for (const a of remote) {
+    if (!a.id) continue;
+    const mine = await one("SELECT id, org_id, status FROM agents WHERE provider_agent_id = $1", [a.id]);
+    if (mine && mine.org_id !== req.auth!.orgId) continue;
+    if (mine) {
+      const status = a.live ? "live" : mine.status === "live" ? "paused" : mine.status;
+      if (status !== mine.status) { await q("UPDATE agents SET status = $2, updated_at = now() WHERE id = $1", [mine.id, status]); updated++; }
+      continue;
+    }
+    let name = String(a.agent_name || "Agent").slice(0, 110);
+    if (await one("SELECT 1 AS x FROM agents WHERE org_id = $1 AND name = $2", [req.auth!.orgId, name])) name = `${name} (Rasen)`;
+    await q(
+      "INSERT INTO agents (org_id, name, playbook, status, config, provider_agent_id, published_at) VALUES ($1, $2, 'custom', $3, $4, $5, $6) ON CONFLICT DO NOTHING",
+      [req.auth!.orgId, name, a.live ? "live" : "draft", JSON.stringify({ importedFromProvider: true, description: a.description || "" }), a.id, a.live ? new Date() : null]
+    );
+    added++;
+  }
+  await audit(req.auth!.orgId, req.auth!.userId, "agents.synced", { added, updated, remote: remote.length });
+  res.json({ added, updated, remote: remote.length, agents: await agents.listAgents(req.auth!.orgId) });
+}));
+
 apiRouter.post("/agents", manager, h(async (req, res) => {
   const a = await agents.createAgent(await org(req), parse(agents.createAgentSchema, req.body));
   await audit(a.orgId, req.auth!.userId, "agent.created", { agentId: a.id, name: a.name });

@@ -6,6 +6,7 @@ import { ContactView } from "../components/Contact";
 import { SOURCE_LABEL, when } from "../lib/format";
 import { useSession } from "../lib/session";
 import { Empty, ErrorNote, Field, Loading, Modal, PageHeader, StatusChip, Toggle } from "../components/ui";
+import { useConfirm } from "../components/Confirm";
 
 export default function Leads() {
   const { can } = useSession();
@@ -73,6 +74,7 @@ function AddLead({ open, onClose }: { open: boolean; onClose: () => void }) {
 }
 
 function EditLead({ lead, onClose, onContact }: { lead: any; onClose: () => void; onContact: (id: string) => void }) {
+  const ask = useConfirm();
   const qc = useQueryClient();
   const { can } = useSession();
   const [f, setF] = useState({ name: lead.name || "", phone: lead.phone_e164 || "", email: lead.email || "", service: lead.service || "", postalCode: lead.postal_code || "", message: lead.message || "", status: lead.status });
@@ -98,7 +100,7 @@ function EditLead({ lead, onClose, onContact }: { lead: any; onClose: () => void
         <div className="flex flex-wrap justify-between gap-2">
           <div className="flex gap-2">
             {lead.customer_id && <button type="button" className="btn-line btn-sm" onClick={() => onContact(lead.customer_id)}>Open conversation</button>}
-            {!ro && <button type="button" className="btn-ghost btn-sm text-bad" onClick={() => confirm("Delete this lead?") && remove.mutate()}>Delete</button>}
+            {!ro && <button type="button" className="btn-ghost btn-sm text-bad" onClick={async () => (await ask({ title: "Delete this lead?", body: "The lead is removed from the inbox. The contact and their calls stay.", confirmLabel: "Delete", danger: true })) && remove.mutate()}>Delete</button>}
           </div>
           {!ro && <div className="flex gap-2"><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn-primary" disabled={save.isPending}>Save</button></div>}
         </div>

@@ -17,6 +17,7 @@ import { getAgent } from "./agents.js";
 import { buildCustomerMemory, toCustomer, upsertCustomer } from "./customers.js";
 import type { Org } from "./orgs.js";
 import { requireVoiceWorkspace } from "./voiceWorkspace.js";
+import { assertCanDial } from "./billing.js";
 
 export const CAMPAIGN_KINDS = ["estimate_followup", "membership_renewal", "reactivation", "after_job", "reminder", "custom", "contacts"] as const;
 
@@ -38,6 +39,9 @@ export const createCampaignSchema = z.object({
   status: z.string().max(40).default(""),
   /** The person creating the campaign confirms everyone on the list agreed to be called; it is recorded as their consent. */
   consentConfirmed: z.boolean().default(false),
+  /** Optional daily calling hours (local minutes). Not set = call straight away, like the CRM. */
+  callingHours: z.object({ opens: z.number().int().min(0).max(1439), closes: z.number().int().min(1).max(1440) })
+    .refine((w) => w.opens < w.closes, "the hours must open before they close").optional(),
 });
 
 interface Recipient { phone: string; customerId: string | null; variables: Record<string, string> }
@@ -114,6 +118,7 @@ const csvCell = (v: string) => (/[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"
 export async function createCampaign(org: Org, userId: string | null, input: z.infer<typeof createCampaignSchema>, now: Date = new Date()) {
   const agent = await getAgent(org.id, input.agentId);
   if (agent.status !== "live" || !agent.providerAgentId) throw conflict("Publish the agent before using it in a campaign.");
+  await assertCanDial(org.id);
   const all = await selectRecipients(org, input, now);
   if (input.consentConfirmed) {
     const ids = all.map((r) => r.customerId).filter(Boolean);
@@ -135,7 +140,7 @@ export async function createCampaign(org: Org, userId: string | null, input: z.i
   const row = (await q(
     `INSERT INTO campaigns (org_id, name, kind, agent_id, status, calling_window, recipient_count, skipped, created_by)
      VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8) RETURNING *`,
-    [org.id, input.name, input.kind, agent.id, JSON.stringify({ timezone: org.timezone, opensMinute: org.settings.callingWindow.opens, closesMinute: org.settings.callingWindow.closes, startAt: input.startAt || null, endAt: input.endAt || null }),
+    [org.id, input.name, input.kind, agent.id, JSON.stringify({ timezone: org.timezone, opensMinute: input.callingHours?.opens ?? null, closesMinute: input.callingHours?.closes ?? null, startAt: input.startAt || null, endAt: input.endAt || null }),
       recipients.length, JSON.stringify(skipped), userId]
   ))[0];
 
@@ -159,8 +164,9 @@ export async function createCampaign(org: Org, userId: string | null, input: z.i
       timeZone: org.timezone,
       windowStartAt: input.startAt ? input.startAt.toISOString() : null,
       windowEndAt: input.endAt ? input.endAt.toISOString() : null,
-      dailyOpensMinute: org.settings.callingWindow.opens,
-      dailyClosesMinute: org.settings.callingWindow.closes,
+      // Like the CRM: no daily window unless the person set one, so "start now" really starts now.
+      dailyOpensMinute: input.callingHours?.opens ?? null,
+      dailyClosesMinute: input.callingHours?.closes ?? null,
       start: input.start,
     });
     const status = input.start ? "running" : "scheduled";
@@ -181,6 +187,7 @@ export async function getCampaignRow(orgId: string, id: string) {
 export async function campaignCommand(org: Org, id: string, command: "start" | "pause" | "resume" | "cancel") {
   const c = await getCampaignRow(org.id, id);
   if (!c.provider_campaign_id) throw badRequest("This campaign was never created at the voice provider.");
+  if (command === "start" || command === "resume") await assertCanDial(org.id);
   const ws = await requireVoiceWorkspace(org.id);
   const r = command === "start" ? await rasen.startCampaign(ws, c.provider_campaign_id)
     : command === "pause" ? await rasen.pauseCampaign(ws, c.provider_campaign_id)

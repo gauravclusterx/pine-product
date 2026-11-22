@@ -11,6 +11,7 @@ import { currentOrgId, del, get, patch, post } from "../lib/api";
 import { ago, duration, SOURCE_LABEL, when } from "../lib/format";
 import { useSession } from "../lib/session";
 import { ErrorNote, Field, Loading, OutcomeChip, StatusChip } from "./ui";
+import { useConfirm } from "./Confirm";
 
 export const STATUS_LABEL: Record<string, string> = {
   fresh: "Fresh", contacted: "Contacted", interested: "Interested", follow_up: "Follow up", callback: "Callback", quote: "Quote",
@@ -101,6 +102,7 @@ export function ContactView({ id, onClose, onDeleted }: { id: string; onClose?: 
   const remove = useMutation({ mutationFn: () => del(`/customers/${id}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ["customers"] }); onDeleted?.(); } });
   const dnc = useMutation({ mutationFn: () => post("/dnc", { phone: info.data.customer.phone, reason: "customer_request" }), onSuccess: refresh });
   const [callAgent, setCallAgent] = useState("");
+  const ask = useConfirm();
   if (info.isLoading || !f) return <Loading />;
   if (info.error) return <ErrorNote error={info.error} />;
   const { customer: c, bookings, leads } = info.data;
@@ -209,8 +211,8 @@ export function ContactView({ id, onClose, onDeleted }: { id: string; onClose?: 
             {leads.length > 0 && <div className="card p-5"><h3 className="eyebrow mb-2">Enquiries</h3>{leads.map((l: any) => <div key={l.id} className="flex justify-between gap-2 py-2 border-t border-canvas-line first:border-0 text-sm"><span>{SOURCE_LABEL[l.source] || l.source} · {l.service || "—"}</span><StatusChip status={l.status} /></div>)}</div>}
             {can("manager") && (
               <div className="card p-5 space-y-2">
-                {!info.data.dnc && <button className="btn-line btn-sm w-full" onClick={() => confirm("Never call or text this number again?") && dnc.mutate()}><Ban className="h-3.5 w-3.5" /> Do not call</button>}
-                <button className="btn-ghost btn-sm w-full text-bad" onClick={() => confirm("Delete this contact? Calls stay in the call log.") && remove.mutate()}><Trash2 className="h-3.5 w-3.5" /> Delete contact</button>
+                {!info.data.dnc && <button className="btn-line btn-sm w-full" onClick={async () => (await ask({ title: "Do not call this number?", body: "Agents and campaigns will never call or text this number again.", confirmLabel: "Do not call", danger: true })) && dnc.mutate()}><Ban className="h-3.5 w-3.5" /> Do not call</button>}
+                <button className="btn-ghost btn-sm w-full text-bad" onClick={async () => (await ask({ title: "Delete this contact?", body: "The contact is removed. Their calls stay in the call log.", confirmLabel: "Delete", danger: true })) && remove.mutate()}><Trash2 className="h-3.5 w-3.5" /> Delete contact</button>
                 <ErrorNote error={dnc.error || remove.error} />
               </div>
             )}

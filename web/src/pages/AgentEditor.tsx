@@ -6,6 +6,7 @@ import { del, get, patch, post } from "../lib/api";
 import { when } from "../lib/format";
 import { useSession } from "../lib/session";
 import { ErrorNote, Field, Loading, PageHeader, StatusChip } from "../components/ui";
+import { useConfirm } from "../components/Confirm";
 
 const ALL_TOOLS: Record<string, string> = {
   lookup_customer: "Look up the caller (before the call)", get_availability: "Check open windows", book_job: "Book the job", reschedule_job: "Reschedule",
@@ -21,6 +22,7 @@ function addName(greeting: string): string {
 }
 
 export default function AgentEditor() {
+  const ask = useConfirm();
   const { id } = useParams();
   const { can } = useSession();
   const qc = useQueryClient();
@@ -125,7 +127,7 @@ export default function AgentEditor() {
             <div className="card p-5 space-y-2">
               <h2 className="font-semibold">Danger zone</h2>
               <button className="btn-line w-full" onClick={() => pause.mutate()} disabled={pause.isPending || a.status !== "live"}><Pause className="h-4 w-4" /> Pause (stop answering)</button>
-              {can("owner") && <button className="btn-line w-full text-bad" onClick={() => { if (confirm(`Archive ${a.name}? It stops taking calls.`)) archive.mutate(); }}><Trash2 className="h-4 w-4" /> Archive agent</button>}
+              {can("owner") && <button className="btn-line w-full text-bad" onClick={async () => { if (await ask({ title: `Archive ${a.name}?`, body: "The agent stops taking and making calls.", confirmLabel: "Archive", danger: true })) archive.mutate(); }}><Trash2 className="h-4 w-4" /> Archive agent</button>}
             </div>
           )}
         </div>

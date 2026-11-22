@@ -298,3 +298,12 @@ export async function automationAllowed(orgId: string): Promise<boolean> {
   const s = await one("SELECT paywall_enabled FROM app_settings WHERE id");
   return !s?.paywall_enabled || subscriptionCurrent(o);
 }
+
+/**
+ * The one gate for every outbound dialling path (single call, speed to lead, retries, campaign
+ * create/start/resume) — like the CRM's hasCredit + subscriptionActive checks.
+ */
+export async function assertCanDial(orgId: string): Promise<void> {
+  if (!(await automationAllowed(orgId))) throw new HttpError(402, "subscription_required", "The subscription is not active (or the workspace is suspended).");
+  if (!(await hasCredit(orgId, "voice", 0.01))) throw new HttpError(402, "no_credits", "No voice credits left — top up in Billing.");
+}
