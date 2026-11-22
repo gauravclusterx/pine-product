@@ -4,7 +4,7 @@
  * Keys are stored encrypted and never returned — only whether one is set and its last four characters.
  *
  * Order tried for a customer: its OpenAI key → its Anthropic key → platform OpenAI → platform
- * Anthropic → OPENAI_API_KEY, then GEMINI_API_KEY from the server env (CRM fallback). A provider that fails falls through to the next.
+ * Anthropic → OPENAI_API_KEY from the server env. A provider that fails falls through to the next.
  * Used by: the SMS agent (AI replies) and "Translate to English" on transcripts.
  */
 import Anthropic from "@anthropic-ai/sdk";
@@ -14,7 +14,7 @@ import { decrypt, encrypt } from "../lib/crypto.js";
 import { HttpError } from "../lib/errors.js";
 import { log } from "../lib/logger.js";
 
-export type Provider = "openai" | "anthropic" | "gemini";
+export type Provider = "openai" | "anthropic";
 export const OPENAI_MODELS = ["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o3", "o4-mini"];
 export const ANTHROPIC_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"];
 
@@ -31,13 +31,12 @@ async function settingsRow() {
   return (await one("SELECT * FROM app_settings WHERE id")) || (await one("INSERT INTO app_settings (id) VALUES (true) ON CONFLICT (id) DO UPDATE SET id = true RETURNING *"))!;
 }
 
-export async function platformKeyStatus(): Promise<KeyStatus & { serverKey: boolean; serverGemini: boolean }> {
+export async function platformKeyStatus(): Promise<KeyStatus & { serverKey: boolean }> {
   const s = await settingsRow();
   return {
     openai: { set: !!s.openai_key_enc, last4: tail(s.openai_key_enc), model: s.openai_model },
     anthropic: { set: !!s.anthropic_key_enc, last4: tail(s.anthropic_key_enc), model: s.anthropic_model },
     serverKey: looksLikeKey("openai", config.OPENAI_API_KEY),
-    serverGemini: !!(process.env.GEMINI_API_KEY || "").trim(),
   };
 }
 
@@ -48,7 +47,7 @@ export async function orgKeyStatus(orgId: string): Promise<KeyStatus & { usesPla
   return {
     openai: { set: !!o.openai_key_enc, last4: tail(o.openai_key_enc), model: o.openai_model || p.openai.model },
     anthropic: { set: !!o.anthropic_key_enc, last4: tail(o.anthropic_key_enc), model: o.anthropic_model || p.anthropic.model },
-    usesPlatform: !o.openai_key_enc && !o.anthropic_key_enc && (p.openai.set || p.anthropic.set || p.serverKey || p.serverGemini),
+    usesPlatform: !o.openai_key_enc && !o.anthropic_key_enc && (p.openai.set || p.anthropic.set || p.serverKey),
   };
 }
 
@@ -100,9 +99,6 @@ export async function credentialsFor(orgId: string | null): Promise<Credential[]
   if (s.openai_key_enc && plain(s.openai_key_enc)) out.push({ provider: "openai", key: plain(s.openai_key_enc), model: s.openai_model, scope: "platform" });
   if (s.anthropic_key_enc && plain(s.anthropic_key_enc)) out.push({ provider: "anthropic", key: plain(s.anthropic_key_enc), model: s.anthropic_model, scope: "platform" });
   if (looksLikeKey("openai", config.OPENAI_API_KEY)) out.push({ provider: "openai", key: config.OPENAI_API_KEY, model: process.env.OPENAI_MODEL || s.openai_model, scope: "server" });
-  // Server fallback, as in the CRM: GEMINI_API_KEY through Google's OpenAI-compatible endpoint.
-  const gemini = (process.env.GEMINI_API_KEY || "").trim();
-  if (gemini && !gemini.startsWith("your-")) out.push({ provider: "gemini", key: gemini, model: process.env.GEMINI_MODEL || "gemini-2.5-flash", scope: "server" });
   return out;
 }
 
@@ -115,17 +111,14 @@ export interface ChatRequest { system: string; messages: ChatMessage[]; maxToken
 export type ChatFn = (cred: Credential, req: ChatRequest) => Promise<string>;
 
 async function openAiChat(cred: Credential, req: ChatRequest): Promise<string> {
-  const gemini = cred.provider === "gemini";
-  const url = gemini ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" : "https://api.openai.com/v1/chat/completions";
-  const limit = gemini ? { max_tokens: Math.max(req.maxTokens ?? 1200, 4000) } : { max_completion_tokens: req.maxTokens ?? 1200 };
-  const r = await fetch(url, {
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${cred.key}` },
-    body: JSON.stringify({ model: cred.model, messages: [{ role: "system", content: req.system }, ...req.messages], ...limit }),
+    body: JSON.stringify({ model: cred.model, messages: [{ role: "system", content: req.system }, ...req.messages], max_completion_tokens: req.maxTokens ?? 1200 }),
     signal: AbortSignal.timeout(60_000),
   });
   const data: any = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`${gemini ? "Gemini" : "OpenAI"} ${r.status}: ${data?.error?.message || data?.[0]?.error?.message || "error"}`);
+  if (!r.ok) throw new Error(`OpenAI ${r.status}: ${data?.error?.message || "error"}`);
   return String(data?.choices?.[0]?.message?.content || "").trim();
 }
 
@@ -153,7 +146,7 @@ async function anthropicChat(cred: Credential, req: ChatRequest): Promise<string
   return res.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("").trim();
 }
 
-export const providerChat: ChatFn = (cred, req) => (cred.provider === "anthropic" ? anthropicChat(cred, req) : openAiChat(cred, req));
+export const providerChat: ChatFn = (cred, req) => (cred.provider === "openai" ? openAiChat(cred, req) : anthropicChat(cred, req));
 
 /** Ask the first credential that works. Throws when none is set or all fail. */
 export async function chatFor(orgId: string | null, req: ChatRequest, chat: ChatFn = providerChat): Promise<{ text: string; provider: Provider; model: string }> {
