@@ -3,12 +3,41 @@
   "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/api/lead", "destination": "https://pine.rasen.ai/api/lead" },
-    { "source": "/api/join-lead", "destination": "https://pine.rasen.ai/api/lead" },
-    { "source": "/login", "destination": "/app.html" },
-    { "source": "/app", "destination": "/app.html" },
-    { "source": "/app/:path*", "destination": "/app.html" },
-    { "source": "/admin", "destination": "/app.html" },
-    { "source": "/admin/:path*", "destination": "/app.html" }
+    {
+      "source": "/api/lead",
+      "destination": "https://pine.rasen.ai/api/lead"
+    },
+    {
+      "source": "/api/join-lead",
+      "destination": "https://pine.rasen.ai/api/lead"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://pine.117-252-16-122.sslip.io/api/:path*"
+    },
+    {
+      "source": "/healthz",
+      "destination": "https://pine.117-252-16-122.sslip.io/healthz"
+    },
+    {
+      "source": "/login",
+      "destination": "/app.html"
+    },
+    {
+      "source": "/app",
+      "destination": "/app.html"
+    },
+    {
+      "source": "/app/:path*",
+      "destination": "/app.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/app.html"
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "/app.html"
+    }
   ]
 }
