@@ -6,7 +6,20 @@ import { ago } from "../lib/format";
 import { useSession } from "../lib/session";
 import { ErrorNote, Field, Loading, Modal, PageHeader, StatusChip } from "../components/ui";
 
-const GROUPS: Record<string, string> = { schedule: "Schedule & CRM", leads: "Lead sources", messaging: "Messaging", alerts: "Team alerts" };
+const GROUPS: Record<string, string> = { schedule: "Dispatch, schedule & CRM", leads: "Lead sources", messaging: "Messaging", alerts: "Team alerts" };
+
+/** What each schedule connector does for the agent — dispatch is where the job lands. */
+const DOES: Record<string, { line: string; chips: string[] }> = {
+  native: { line: "Built-in dispatch board and calendar — no other software needed.", chips: ["Dispatch board", "Slots"] },
+  servicetitan: { line: "Books onto your ServiceTitan dispatch board, following Capacity Planning (technicians and arrival windows).", chips: ["Dispatch board", "Capacity planning", "Customers", "Memberships"] },
+  housecall_pro: { line: "Creates the job on your Housecall Pro schedule for dispatch to a technician.", chips: ["Dispatch / schedule", "Customers"] },
+  jobber: { line: "Creates the visit in Jobber so it shows on your schedule for dispatch.", chips: ["Dispatch / schedule", "Clients"] },
+  salesforce: { line: "Saves the caller as a lead or contact and logs the call.", chips: ["Leads", "Contacts"] },
+  acculynx: { line: "Creates the lead and the inspection appointment in AccuLynx.", chips: ["Jobs", "Appointments"] },
+  generic_rest: { line: "Sends bookings to your own system over a signed HTTPS endpoint.", chips: ["Any system"] },
+  google_calendar: { line: "Books into a Google Calendar.", chips: ["Calendar"] },
+  outlook: { line: "Books into an Outlook / Microsoft 365 calendar.", chips: ["Calendar"] },
+};
 
 export default function Integrations() {
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => get("/integrations/catalog") });
@@ -33,7 +46,9 @@ export default function Integrations() {
                     <div className="font-medium">{c.label}</div>
                     {active ? <StatusChip status={row?.status || "connected"} /> : <span className="chip bg-canvas-deep text-ink-mute">not connected</span>}
                   </div>
+                  {DOES[c.kind] && <div className="text-xs text-ink-mute mt-1.5 leading-relaxed">{DOES[c.kind].line}</div>}
                   <div className="mt-2 flex flex-wrap gap-1.5">
+                    {DOES[c.kind]?.chips.map((x) => <span key={x} className="chip bg-white/[0.06] text-ink-soft">{x}</span>)}
                     {c.maturity === "unverified" && <span className="chip bg-warn-wash text-warn" title="Built against the vendor's published API and covered by tests; not yet run against a live account.">not live-tested yet</span>}
                     {g === "schedule" && crm === c.kind && <span className="chip bg-leaf-wash text-leaf-dark"><CheckCircle2 className="h-3 w-3" /> schedule system</span>}
                   </div>
