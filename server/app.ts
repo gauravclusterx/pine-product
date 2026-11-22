@@ -54,9 +54,11 @@ export function buildApp() {
 
   // The built web app (npm run build). In development Vite serves it instead.
   const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
-  if (fs.existsSync(path.join(dist, "index.html"))) {
+  // The build writes the app page as app.html; dist/index.html is the landing page.
+  const page = ["app.html", "index.html"].map((f) => path.join(dist, f)).find((f) => fs.existsSync(f));
+  if (page) {
     app.use(express.static(dist, { index: false, maxAge: "1h" }));
-    app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(path.join(dist, "index.html")));
+    app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(page));
   }
   app.use(errorMiddleware);
   return app;

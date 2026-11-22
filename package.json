@@ -13,7 +13,7 @@
     "worker": "tsx server/worker.ts",
     "db:migrate": "tsx server/db/migrate.ts",
     "dev:web": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/merge-landing.mjs",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
