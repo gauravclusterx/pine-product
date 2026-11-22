@@ -14,7 +14,7 @@ export default function Numbers() {
     <div>
       <PageHeader title="Phone numbers" subtitle="Choose which agent answers each number." />
       <ErrorNote error={route.error} />
-      {q.isLoading ? <Loading /> : q.error ? <ErrorNote error={q.error} /> : !q.data.numbers.length ? <Empty title="No numbers yet" body="Your Pine AI contact imports your existing number or connects your SIP trunk." /> : (
+      {q.isLoading ? <Loading /> : q.error ? <ErrorNote error={q.error} /> : !q.data.numbers.length ? <Empty title={q.data.connected === false ? "Calling is not connected yet" : "No numbers yet"} body={q.data.connected === false ? "Your Pine AI contact connects your voice workspace; your numbers appear here after that." : "Your Pine AI contact imports your existing number or connects your SIP trunk."} /> : (
         <div className="card divide-y divide-canvas-line">
           {q.data.numbers.map((n: any) => (
             <div key={n.id} className="flex flex-wrap items-center gap-4 px-4 py-4">

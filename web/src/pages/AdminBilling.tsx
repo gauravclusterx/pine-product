@@ -86,7 +86,7 @@ function CustomerPanel({ id, onClose }: { id: string; onClose: () => void }) {
         <StatusChip status={b.suspended ? "failed" : b.active ? "active" : "draft"} />
         <span className="text-ink-mute">{b.suspended ? "suspended" : b.status}{b.expiresAt && b.status !== "trial" ? ` · until ${when(b.expiresAt, { dateStyle: "medium" })}` : ""}{b.status === "trial" && b.trialEndsAt ? ` · trial until ${when(b.trialEndsAt, { dateStyle: "medium" })}` : ""}</span>
         <span className="text-ink-mute">· this month {usage.calls} calls, {credits(usage.minutes)} min, {usage.booked} booked</span>
-        <button className="btn-line btn-sm ml-auto" onClick={() => { switchOrg(id); nav("/app"); }}>Open workspace <ArrowUpRight className="h-3.5 w-3.5" /></button>
+        <button className="btn-line btn-sm ml-auto" onClick={async () => { await switchOrg(id); nav("/app"); }}>Open workspace <ArrowUpRight className="h-3.5 w-3.5" /></button>
       </div>
       <div className="grid md:grid-cols-2 gap-4">
         <Section title="Subscription">

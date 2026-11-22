@@ -62,7 +62,7 @@ export function AdminOverview() {
           </div>
           <div className="mt-4 space-y-3">
             {d.topClients.length ? d.topClients.map((c: any) => (
-              <button key={c.id} onClick={() => { switchOrg(c.id); nav("/app"); }} className="w-full text-left glass rounded-2xl p-4 flex gap-3.5 hover:bg-white/[0.07] transition">
+              <button key={c.id} onClick={async () => { await switchOrg(c.id); nav("/app"); }} className="w-full text-left glass rounded-2xl p-4 flex gap-3.5 hover:bg-white/[0.07] transition">
                 <div className="h-11 w-11 shrink-0 rounded-xl bg-white/[0.07] shadow-card grid place-items-center text-ink-soft"><Building2 className="h-4 w-4" /></div>
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-ink truncate">{c.name}</div>
@@ -113,7 +113,7 @@ export function AdminClients() {
                 <td className="td"><StatusChip status={o.status} /></td>
                 <td className="td text-right whitespace-nowrap">
                   <button className="btn-line btn-sm" onClick={() => setVoiceFor(o)}>Voice key</button>
-                  <button className="btn-ghost btn-sm" onClick={() => { switchOrg(o.id); nav("/app"); }}>Open <ArrowUpRight className="h-3.5 w-3.5" /></button>
+                  <button className="btn-ghost btn-sm" onClick={async () => { await switchOrg(o.id); nav("/app"); }}>Open <ArrowUpRight className="h-3.5 w-3.5" /></button>
                 </td>
               </tr>
             );

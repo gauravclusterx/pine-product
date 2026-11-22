@@ -95,7 +95,8 @@ export function composePrompt(org: Org, playbook: Playbook, brief: string, agent
  */
 export function defaultGreeting(org: Org, playbook: Playbook, agentName: string): string {
   if (PLAYBOOKS[playbook]?.direction === "outbound") return `Hi {{greeting_name}}, this is ${agentName} calling from ${org.name}. Is now a good moment?`;
-  return `Hi {{lookup_customer.name|there}}, thanks for calling ${org.name}, this is ${agentName}. How can I help you today?`;
+  // Only declared variables may appear in a first message (the provider refuses tool-result paths).
+  return `Hi {{greeting_name}}, thanks for calling ${org.name}, this is ${agentName}. How can I help you today?`;
 }
 
 /** Post-call fields every agent extracts; they drive outcomes, the dashboard and QA. */

@@ -207,6 +207,15 @@ const APPENDIX_MARK = "CUSTOMER CONTEXT (auto-injected by the platform";
  * flattens the same way). Only the `contact.` alias is touched — `{{lookup_caller.name|there}}`
  * (a real tool-result reference) is left alone.
  */
+/**
+ * A first message may reference declared variables only. The provider refuses a tool-result path such
+ * as {{lookup_customer.name|there}} ("field first_messages: The request is not valid"), so any
+ * dotted variable other than contact.* becomes {{greeting_name}} (declared, defaults to "there").
+ */
+export function safeFirstMessage(text: string): string {
+  return flattenMergeFields(text).replace(/{{s*(?!contact_)[A-Za-z0-9_]+.[^}]*}}/g, "{{greeting_name}}").slice(0, 2000);
+}
+
 export function flattenMergeFields(text: string): string {
   return String(text || "").replace(/\{\{\s*contact\.([A-Za-z0-9_ ]{1,60}?)\s*(\|[^}]*)?\}\}/g, (_m, key: string, fallback?: string) => {
     const flat = String(key).trim().replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
@@ -244,7 +253,7 @@ const PLATFORM_VARIABLES: Array<{ key: string; description: string; sensitivity:
 function settingsPatch(cfg: AgentConfigInput): Record<string, any> {
   const s: Record<string, any> = {};
   if (cfg.name !== undefined) s.agent_name = String(cfg.name).slice(0, 120);
-  if (cfg.firstMessage !== undefined) s.first_message = flattenMergeFields(String(cfg.firstMessage || "")).slice(0, 2000);
+  if (cfg.firstMessage !== undefined) s.first_message = safeFirstMessage(String(cfg.firstMessage || ""));
   if (cfg.language !== undefined) s.language = normaliseLanguage(cfg.language);
   if (cfg.timezone) s.timezone = cfg.timezone;
   if (cfg.callDirection !== undefined) s.call_direction = cfg.callDirection;

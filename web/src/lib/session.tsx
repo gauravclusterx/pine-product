@@ -31,7 +31,7 @@ interface SessionValue {
   me: Me | null;
   loading: boolean;
   can: (role: "viewer" | "manager" | "owner") => boolean;
-  switchOrg: (id: string) => void;
+  switchOrg: (id: string) => Promise<void>;
   signOut: () => Promise<void>;
   refresh: () => void;
 }
@@ -65,7 +65,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     me,
     loading: isLoading,
     can: (role) => !!me && (me.user.isPlatformAdmin || RANK[me.role] >= RANK[role]),
-    switchOrg: (id) => { setCurrentOrgId(id); qc.clear(); qc.invalidateQueries(); },
+    // Drop every cached answer of the old workspace and wait for the session to reload with the new
+    // one; clear() alone left the session query showing the previous (empty) workspace.
+    switchOrg: async (id) => { setCurrentOrgId(id); qc.removeQueries({ predicate: (x) => x.queryKey[0] !== "me" }); await qc.resetQueries({ queryKey: ["me"] }); },
     signOut: async () => { await post("/auth/logout").catch(() => {}); setCurrentOrgId(""); qc.clear(); window.location.href = "/login"; },
     refresh: () => qc.invalidateQueries({ queryKey: ["me"] }),
   };

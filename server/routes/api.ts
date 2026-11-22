@@ -255,6 +255,8 @@ apiRouter.get("/voice/voices", viewer, h(async (req, res) => {
 }));
 
 apiRouter.get("/voice/numbers", viewer, h(async (req, res) => {
+  // Not connected yet: an empty list with a reason, not an error page.
+  if (!(await one("SELECT 1 AS x FROM voice_workspaces WHERE org_id = $1", [req.auth!.orgId]))) return res.json({ numbers: [], connected: false });
   const ws = await requireVoiceWorkspace(req.auth!.orgId);
   const remote = await rasen.listMappedPhoneNumbers(ws);
   for (const n of remote) {

@@ -21,7 +21,7 @@ describe("agent projection", () => {
     expect(cfg.systemPrompt).toMatch(/AC repair \(typical ticket \$350\)/);
     expect(cfg.systemPrompt).toMatch(/\$89 tune-up special/);
     // Inbound: the caller name from the before-call lookup, "there" when unknown.
-    expect(cfg.firstMessage).toBe("Hi {{lookup_customer.name|there}}, thanks for calling Acme Heating & Air, this is Ava. How can I help you today?");
+    expect(cfg.firstMessage).toBe("Hi {{greeting_name}}, thanks for calling Acme Heating & Air, this is Ava. How can I help you today?");
     expect(cfg.transferNumber).toBe("+12125550100");
     expect(cfg.callDirection).toBe("inbound");
     expect(cfg.extractionFields!.map((f) => f.name)).toContain("outcome");
@@ -150,5 +150,14 @@ describe("lead sources", () => {
     const lead = parseLeadEmail({ from: "leads@angi.com", subject: "New lead: AC Repair", messageId: "m1", text: "Name: Maria Santos\nPhone: (212) 555-0142\nZip Code: 10001\nService Requested: AC Repair\nComments: blowing warm air" })!;
     expect(lead).toMatchObject({ source: "angi", sourceRef: "email:m1", name: "Maria Santos", phone: "(212) 555-0142", postalCode: "10001", service: "AC Repair", message: "blowing warm air" });
     expect(parseLeadEmail({ from: "x@y.com", subject: "hello", messageId: "m2", text: "no number here" })).toBeNull();
+  });
+});
+
+describe("first message variables", async () => {
+  const { safeFirstMessage } = await import("../voice/rasen/service.js");
+  it("never sends a tool-result path to the provider", () => {
+    expect(safeFirstMessage("Hi {{lookup_customer.name|there}}, thanks for calling.")).toBe("Hi {{greeting_name}}, thanks for calling.");
+    expect(safeFirstMessage("Hi {{greeting_name}}!")).toBe("Hi {{greeting_name}}!");
+    expect(safeFirstMessage("Hi {{contact.firstName|there}}")).toBe("Hi {{contact_first_name|there}}");
   });
 });
