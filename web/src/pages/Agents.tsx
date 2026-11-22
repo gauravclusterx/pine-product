@@ -48,10 +48,11 @@ export default function Agents() {
 function NewAgent({ open, onClose, playbooks }: { open: boolean; onClose: () => void; playbooks: Record<string, any> }) {
   const [name, setName] = useState("Ava");
   const [playbook, setPlaybook] = useState("inbound_booking");
+  const [website, setWebsite] = useState("");
   const nav = useNavigate();
   const qc = useQueryClient();
   const m = useMutation({
-    mutationFn: () => post("/agents", { name, playbook }),
+    mutationFn: () => (website.trim() ? post("/agents/from-website", { name, playbook, url: website.trim() }) : post("/agents", { name, playbook })),
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ["agents"] }); onClose(); nav(`/app/agents/${r.agent.id}`); },
   });
   const submit = (e: FormEvent) => { e.preventDefault(); m.mutate(); };
@@ -59,6 +60,7 @@ function NewAgent({ open, onClose, playbooks }: { open: boolean; onClose: () => 
     <Modal open={open} onClose={onClose} title="New agent" wide>
       <form onSubmit={submit} className="space-y-4">
         <Field label="Name the agent introduces itself with"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={60} /></Field>
+        <Field label="Your website (optional)" hint="The agent reads it and answers callers from it; it goes live by itself once the site is read."><input className="input" type="url" placeholder="https://yourbusiness.com" value={website} onChange={(e) => setWebsite(e.target.value)} /></Field>
         <div>
           <span className="label">Playbook</span>
           <div className="grid sm:grid-cols-2 gap-2">

@@ -8,6 +8,7 @@ import { Empty, ErrorNote, Field, Loading, Modal, PageHeader, StatusChip } from 
 import { useConfirm } from "../components/Confirm";
 
 const KINDS: Record<string, { label: string; body: string }> = {
+  selected: { label: "Pick contacts", body: "Choose the exact leads and customers to call, one by one." },
   contacts: { label: "Leads / customers in the CRM", body: "Pick by type and status — e.g. every lead marked Interested." },
   estimate_followup: { label: "Estimate follow-up", body: "Customers with an open estimate in your CRM." },
   membership_renewal: { label: "Membership renewal", body: "Plans ending in the next 45 days." },
@@ -61,7 +62,7 @@ export default function Campaigns() {
 function NewCampaign({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => get("/agents"), enabled: open });
-  const [f, setF] = useState<any>({ name: "", kind: "contacts", agentId: "", csv: "", inactiveMonths: 12, start: true, stage: "all", status: "", consentConfirmed: true, limitHours: false, opens: "09:00", closes: "20:00" });
+  const [f, setF] = useState<any>({ name: "", kind: "selected", agentId: "", csv: "", inactiveMonths: 12, start: true, stage: "all", status: "", consentConfirmed: true, limitHours: false, opens: "09:00", closes: "20:00", customerIds: [] as string[] });
   const statuses = useQuery({ queryKey: ["customers", "statuses"], queryFn: () => get("/customers?limit=1"), enabled: open });
   const toMin = (t: string) => { const [h, m] = t.split(":").map(Number); return (h || 0) * 60 + (m || 0); };
   const m = useMutation({ mutationFn: () => { const { limitHours, opens, closes, ...rest } = f; return post("/campaigns", { ...rest, csv: f.kind === "custom" ? f.csv : undefined, callingHours: limitHours ? { opens: toMin(opens), closes: toMin(closes) } : undefined }); }, onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); onClose(); } });
@@ -87,13 +88,14 @@ function NewCampaign({ open, onClose }: { open: boolean; onClose: () => void }) 
             <input type="file" accept=".csv,text/csv" className="text-sm" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setF({ ...f, csv: await file.text() }); }} />
           </Field>
         )}
+        {f.kind === "selected" && <ContactPicker value={f.customerIds} onChange={(ids) => setF({ ...f, customerIds: ids })} />}
         {f.kind === "contacts" && (
           <div className="grid grid-cols-2 gap-3">
             <Field label="From the CRM"><select className="input" value={f.stage} onChange={(e) => setF({ ...f, stage: e.target.value })}><option value="all">Leads and customers</option><option value="lead">Leads only</option><option value="customer">Customers only</option></select></Field>
             <Field label="With status"><select className="input" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">Any status</option>{(statuses.data?.statuses || []).map((x: string) => <option key={x} value={x}>{x.replace(/_/g, " ")}</option>)}</select></Field>
           </div>
         )}
-        {(f.kind === "custom" || f.kind === "contacts") && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-leaf h-4 w-4" checked={f.consentConfirmed} onChange={(e) => setF({ ...f, consentConfirmed: e.target.checked })} /> Everyone on this list agreed to be called (recorded as their consent)</label>}
+        {(f.kind === "custom" || f.kind === "contacts" || f.kind === "selected") && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-leaf h-4 w-4" checked={f.consentConfirmed} onChange={(e) => setF({ ...f, consentConfirmed: e.target.checked })} /> Everyone on this list agreed to be called (recorded as their consent)</label>}
         {f.kind === "reactivation" && <Field label="No job for at least (months)"><input type="number" className="input w-32" min={1} max={60} value={f.inactiveMonths} onChange={(e) => setF({ ...f, inactiveMonths: Number(e.target.value) })} /></Field>}
         <Field label="Agent" hint={!all.length ? "Create an agent in Agents first." : !live.length ? "Your agents are drafts — open the agent and press Publish, then pick it here." : "Only published agents can call."}>
           <select className="input" value={f.agentId} onChange={(e) => setF({ ...f, agentId: e.target.value })} required>
@@ -132,6 +134,36 @@ function CampaignProgress({ c }: { c: any }) {
     <div className="text-xs text-ink-mute mt-1 space-y-0.5">
       {r && <div>{r.pending ?? 0} waiting · {r.dialing ?? 0} dialling · {r.reached ?? 0} reached{r.exhausted ? ` · ${r.exhausted} no answer` : ""}</div>}
       {waiting && <div className="text-warn">{waiting}</div>}
+    </div>
+  );
+}
+
+/** Pick contacts one by one (search, filter by type/status, select all shown) — like the CRM. */
+function ContactPicker({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }) {
+  const [term, setTerm] = useState("");
+  const [stage, setStage] = useState("");
+  const q = useQuery({ queryKey: ["customers", "picker", stage, term], queryFn: () => get(`/customers?limit=500&stage=${stage}&q=${encodeURIComponent(term)}`) });
+  const rows: any[] = q.data?.customers || [];
+  const chosen = new Set(value);
+  const toggle = (id: string) => onChange(chosen.has(id) ? value.filter((x) => x !== id) : [...value, id]);
+  const allShown = rows.length > 0 && rows.every((r) => chosen.has(r.id));
+  return (
+    <div className="rounded-2xl well p-3">
+      <div className="flex flex-wrap gap-2 mb-2">
+        <input className="input h-9 flex-1 min-w-[180px]" placeholder="Search name, phone, tag" value={term} onChange={(e) => setTerm(e.target.value)} />
+        <select className="input h-9 w-36" value={stage} onChange={(e) => setStage(e.target.value)} aria-label="Type"><option value="">Everyone</option><option value="lead">Leads</option><option value="customer">Customers</option></select>
+        <button type="button" className="btn-line btn-sm h-9" onClick={() => onChange(allShown ? value.filter((id) => !rows.some((r) => r.id === id)) : [...new Set([...value, ...rows.map((r) => r.id)])])}>{allShown ? "Unselect shown" : "Select all shown"}</button>
+      </div>
+      <div className="max-h-64 overflow-y-auto divide-y divide-white/5">
+        {q.isLoading ? <div className="text-sm text-ink-mute p-3">Loading…</div> : !rows.length ? <div className="text-sm text-ink-mute p-3">No contacts match.</div> : rows.map((r) => (
+          <label key={r.id} className="flex items-center gap-3 px-2 py-2 text-sm cursor-pointer hover:bg-white/[0.04] rounded-lg">
+            <input type="checkbox" className="accent-leaf h-4 w-4" checked={chosen.has(r.id)} onChange={() => toggle(r.id)} />
+            <span className="flex-1 min-w-0 truncate text-ink">{r.name || "Unnamed"} <span className="text-ink-mute tabular-nums">{r.phone_e164}</span></span>
+            <span className="text-xs text-ink-mute">{r.stage === "customer" ? "Customer" : "Lead"} · {String(r.status).replace(/_/g, " ")}</span>
+          </label>
+        ))}
+      </div>
+      <div className="text-xs text-ink-mute mt-2">{value.length} selected</div>
     </div>
   );
 }

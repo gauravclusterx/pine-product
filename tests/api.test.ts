@@ -570,3 +570,66 @@ describe("booking capture from a call (like the CRM's bookingCapture)", () => {
     expect(list.body.bookings.map((x: any) => x.customer_name)).toContain("Palak");
   });
 });
+
+describe("campaign with hand-picked contacts, knowledge, website agents, customer memory", () => {
+  it("a campaign calls exactly the contacts that were picked", async () => {
+    const { owner, orgId } = await setupOrg("Pick Cooling", "ra_ok_pk_0123456789");
+    const agent = await liveAgent(owner, orgId, "speed_to_lead");
+    const a = await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "Pick A", phone: "+12125550161", stage: "lead" });
+    await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "Not picked", phone: "+12125550162", stage: "lead" });
+    const c = await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "Pick C", phone: "+12125550163", stage: "customer" });
+    const r = await owner.agent.post("/api/campaigns").set(owner.csrf).send({ name: "Picked", kind: "selected", customerIds: [a.body.customer.id, c.body.customer.id], agentId: agent.id, consentConfirmed: true });
+    expect(r.status).toBe(201);
+    expect(r.body.campaign.recipient_count).toBe(2);
+    const csv = campaignCsvs[campaignCsvs.length - 1];
+    expect(csv).toContain("+12125550161");
+    expect(csv).toContain("+12125550163");
+    expect(csv).not.toContain("+12125550162");
+    expect((await owner.agent.post("/api/campaigns").set(owner.csrf).send({ name: "Empty", kind: "selected", customerIds: [], agentId: agent.id, consentConfirmed: true })).status).toBe(400);
+  });
+
+  it("knowledge: add a website and text to an agent, list it, and publishing is scheduled", async () => {
+    const svc: any = await import("../server/voice/rasen/service.js");
+    const added: any[] = [];
+    const s1 = vi.spyOn(svc, "addAgentKnowledge").mockImplementation(async (_ws: any, _id: string, src: any) => { added.push(src); return { id: `ks_${added.length}`, name: src.name || src.url, kind: src.kind, state: "pending", url: src.url || null, failure: null, relation: "owned", updatedAt: null }; });
+    const s2 = vi.spyOn(svc, "listAgentKnowledge").mockResolvedValue([{ id: "ks_1", name: "acme.com", kind: "url", state: "ingesting", url: "https://acme.com", failure: null, relation: "owned", updatedAt: null }]);
+    const { owner, orgId } = await setupOrg("Kb Heating", "ra_ok_kb_0123456789");
+    const agent = await liveAgent(owner, orgId);
+    expect((await owner.agent.post(`/api/agents/${agent.id}/knowledge`).set(owner.csrf).send({ kind: "url", url: "http://insecure.example.com" })).status).toBe(400);
+    expect((await owner.agent.post(`/api/agents/${agent.id}/knowledge`).set(owner.csrf).send({ kind: "url", url: "https://acme.com" })).status).toBe(202);
+    expect((await owner.agent.post(`/api/agents/${agent.id}/knowledge`).set(owner.csrf).send({ kind: "text", name: "Prices", text: "AC service ₹499" })).status).toBe(202);
+    expect(added.map((x) => x.kind)).toEqual(["url", "text"]);
+    const list = await owner.agent.get(`/api/agents/${agent.id}/knowledge`);
+    expect(list.body).toMatchObject({ pending: true, sources: [{ name: "acme.com", state: "ingesting" }] });
+    expect(await one("SELECT 1 AS x FROM jobs WHERE queue = 'agent.knowledge_publish' AND org_id = $1", [orgId])).toBeTruthy();
+    expect((await owner.agent.post(`/api/agents/${agent.id}/knowledge/upload`).set(owner.csrf).send({ name: "x", filename: "virus.exe", dataBase64: "AAAA" })).status).toBe(400);
+    s1.mockRestore(); s2.mockRestore();
+  });
+
+  it("an agent made from a website gets the site as knowledge", async () => {
+    const svc: any = await import("../server/voice/rasen/service.js");
+    const s1 = vi.spyOn(svc, "addAgentKnowledge").mockResolvedValue({ id: "ks_w", name: "acme.com", kind: "url", state: "pending", url: "https://acme.com", failure: null, relation: "owned", updatedAt: null });
+    const { owner, orgId } = await setupOrg("Web Plumbing", "ra_ok_wb_0123456789");
+    const r = await owner.agent.post("/api/agents/from-website").set(owner.csrf).send({ name: "Webby", playbook: "inbound_booking", url: "https://acme.com" });
+    expect(r.status).toBe(201);
+    expect(r.body.source).toMatchObject({ kind: "url", state: "pending" });
+    expect((await one("SELECT config FROM agents WHERE id = $1", [r.body.agent.id]))!.config.website).toBe("https://acme.com");
+    expect(await one("SELECT 1 AS x FROM jobs WHERE queue = 'agent.knowledge_publish' AND org_id = $1", [orgId])).toBeTruthy();
+    s1.mockRestore();
+  });
+
+  it("every agent gets one cross-channel memory: calls, SMS, jobs, status", async () => {
+    const { owner, orgId } = await setupOrg("Memory Air", "ra_ok_mm_0123456789");
+    const c = await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "Riya Sen", phone: "+12125550164", stage: "customer" });
+    await owner.agent.patch(`/api/customers/${c.body.customer.id}`).set(owner.csrf).send({ status: "interested", tags: ["vip"], notes: "Gate code 4411" });
+    await q("INSERT INTO messages (org_id, customer_id, phone_e164, direction, author, body, status) VALUES ($1, $2, '+12125550164', 'in', 'customer', 'Can you come Friday?', 'received')", [orgId, c.body.customer.id]);
+    const { buildCustomerMemory, getCustomer } = await import("../server/modules/customers.js");
+    const { getOrg } = await import("../server/modules/orgs.js");
+    const m = await buildCustomerMemory(await getOrg(orgId), await getCustomer(orgId, c.body.customer.id));
+    expect(m.profile).toContain("Riya Sen");
+    expect(m.profile).toContain("Gate code 4411");
+    expect(m.profile).toContain("Status: interested");
+    expect(m.profile).toContain("Tags: vip");
+    expect(m.context).toContain("Customer (SMS): Can you come Friday?");
+  });
+});

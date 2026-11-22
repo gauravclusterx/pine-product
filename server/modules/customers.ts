@@ -110,6 +110,9 @@ export async function buildCustomerMemory(org: Org, customer: Customer | null, n
     [a.street, a.city, a.state, a.postalCode].filter(Boolean).length ? `Address: ${[a.street, a.city, a.state, a.postalCode].filter(Boolean).join(", ")}` : "",
     customer.crmSnapshot?.membership ? `Membership: ${customer.crmSnapshot.membership.name} (${customer.crmSnapshot.membership.status})` : "",
     customer.notes ? `Notes from the office: ${customer.notes.slice(0, 400)}` : "",
+    customer.status && customer.status !== "fresh" ? `Status: ${customer.status.replace(/_/g, " ")}` : "",
+    customer.tags?.length ? `Tags: ${customer.tags.join(", ")}` : "",
+    customer.stage === "customer" ? "An existing customer of the business." : "",
   ].filter(Boolean).join("\n");
 
   const upcoming = await q(
@@ -130,6 +133,20 @@ export async function buildCustomerMemory(org: Org, customer: Customer | null, n
     lines.push("Earlier calls (newest first):");
     for (const c of calls) lines.push(`- ${speakTime(new Date(c.started_at), tz)} (${c.direction}${c.outcome ? ", " + c.outcome : ""}): ${String(c.summary).slice(0, 300)}`);
   }
+  // Cross-channel (like the CRM's customer RAG): the text conversation, so a voice agent knows what was said by SMS.
+  const texts = await q(
+    "SELECT direction, author, body, created_at FROM messages WHERE org_id = $1 AND (customer_id = $2 OR phone_e164 = $3) ORDER BY created_at DESC LIMIT 8",
+    [org.id, customer.id, customer.phone]
+  );
+  if (texts.length) {
+    lines.push("Recent text messages (oldest first):");
+    for (const m of texts.reverse()) lines.push(`- ${speakTime(new Date(m.created_at), tz)} ${m.direction === "in" ? "Customer" : "Business"} (SMS): ${String(m.body).slice(0, 200)}`);
+  }
+  const past = await q(
+    "SELECT job_type, starts_at, status FROM bookings WHERE org_id = $1 AND customer_id = $2 AND starts_at <= now() ORDER BY starts_at DESC LIMIT 2",
+    [org.id, customer.id]
+  );
+  for (const b of past) lines.push(`Past job: ${b.job_type || "service visit"} on ${speakTime(new Date(b.starts_at), tz)} (${b.status}).`);
   const lead = await one("SELECT source, service, message, received_at FROM leads WHERE org_id = $1 AND customer_id = $2 ORDER BY received_at DESC LIMIT 1", [org.id, customer.id]);
   if (lead) lines.push(`Latest enquiry: via ${lead.source}${lead.service ? ` for ${lead.service}` : ""}${lead.message ? ` — "${String(lead.message).slice(0, 200)}"` : ""}.`);
 

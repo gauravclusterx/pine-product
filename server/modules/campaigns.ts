@@ -21,7 +21,7 @@ import { harvestCampaignHints } from "./callHints.js";
 import { log } from "../lib/logger.js";
 import { assertCanDial } from "./billing.js";
 
-export const CAMPAIGN_KINDS = ["estimate_followup", "membership_renewal", "reactivation", "after_job", "reminder", "custom", "contacts"] as const;
+export const CAMPAIGN_KINDS = ["estimate_followup", "membership_renewal", "reactivation", "after_job", "reminder", "custom", "contacts", "selected"] as const;
 
 export const createCampaignSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -36,6 +36,8 @@ export const createCampaignSchema = z.object({
   maxAttemptsPerRecipient: z.number().int().min(1).max(5).default(2),
   /** Start now (default) or only create and plan it. */
   start: z.boolean().default(true),
+  /** For kind "selected": the contacts picked one by one. */
+  customerIds: z.array(z.string().uuid()).max(5000).default([]),
   /** For kind "contacts": leads/customers from the CRM, optionally by status. */
   stage: z.enum(["lead", "customer", "all"]).default("all"),
   status: z.string().max(40).default(""),
@@ -83,6 +85,10 @@ export async function selectRecipients(org: Org, input: z.infer<typeof createCam
          WHERE c.org_id = $1 AND b.status IN ('booked','rescheduled') AND b.starts_at BETWEEN $2::timestamptz + interval '12 hours' AND $2::timestamptz + interval '36 hours' LIMIT 20000`,
         [org.id, now]
       );
+      break;
+    case "selected":
+      if (!input.customerIds.length) throw badRequest("Pick at least one contact to call.");
+      rows = await q("SELECT * FROM customers WHERE org_id = $1 AND id = ANY($2::uuid[])", [org.id, input.customerIds]);
       break;
     case "contacts":
       rows = await q(

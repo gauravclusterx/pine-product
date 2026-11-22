@@ -7,6 +7,7 @@ import { when } from "../lib/format";
 import { useSession } from "../lib/session";
 import { ErrorNote, Field, Loading, PageHeader, StatusChip } from "../components/ui";
 import { useConfirm } from "../components/Confirm";
+import { AgentKnowledge, AgentVersions } from "../components/AgentKnowledge";
 
 const ALL_TOOLS: Record<string, string> = {
   lookup_customer: "Look up the caller (before the call)", get_availability: "Check open windows", book_job: "Book the job", reschedule_job: "Reschedule",
@@ -84,6 +85,7 @@ export default function AgentEditor() {
             <pre className="whitespace-pre-wrap text-xs bg-canvas-tint rounded-xl p-4 max-h-[420px] overflow-y-auto border border-canvas-line">{q.data.preview.systemPrompt}</pre>
             <p className="text-xs text-ink-mute mt-2">On every call the platform adds this customer's name on file, profile and history, so the agent never asks for what you already know.</p>
           </div>
+          {a.providerAgentId && <AgentKnowledge agentId={a.id} canEdit={can("manager")} />}
         </div>
         <div className="space-y-4">
           <div className="card p-5 space-y-4">
@@ -106,6 +108,7 @@ export default function AgentEditor() {
             </Field>
             {form.voicemail === "leave_message" && <Field label="Voicemail message"><textarea className="textarea" value={form.voicemailMessage} onChange={(e) => set("voicemailMessage", e.target.value)} disabled={!editable} placeholder="Empty = a short default message." /></Field>}
           </div>
+          {a.providerAgentId && <AgentVersions agentId={a.id} canEdit={can("manager")} />}
           <div className="card p-5">
             <h2 className="font-semibold mb-1">Tools</h2>
             <p className="text-xs text-ink-mute mb-3">What the agent may do in your systems during a call.</p>

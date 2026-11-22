@@ -15,7 +15,7 @@ const SIGNALS = /\b(book|booked|booking|appointment|schedule|slot|visit|technici
 
 const SYSTEM = (today: string, services: string) => `Today is ${today}. You read a phone call between a business's agent and a customer and decide what happened to a service appointment. Output STRICT JSON only:
 {"action": "book" | "reschedule" | "cancel" | "none",
- "service": the service booked (match one of: ${services || "any"}), or "",
+ "service": ${services ? `the service booked (match one of: ${services})` : "the service or reason for the appointment in a few words (e.g. AC repair, Site visit)"}, or "",
  "dateISO": the (new) appointment date as YYYY-MM-DD (work it out from "tomorrow", weekdays etc.), or "",
  "time": the (new) start time as HH:MM 24-hour, or "",
  "address": service address if given, or "",
@@ -35,7 +35,7 @@ export function parseCapture(text: string): { action: string; service: string; d
 }
 
 export async function captureBookingFromCall(callId: string, chat?: ChatFn): Promise<"booked" | "rescheduled" | "cancelled" | "none" | "skipped"> {
-  const c = await one("SELECT id, org_id, customer_id, lead_id, transcript, status FROM calls WHERE id = $1", [callId]);
+  const c = await one("SELECT id, org_id, customer_id, lead_id, transcript, status, extraction FROM calls WHERE id = $1", [callId]);
   if (!c || c.status !== "ended" || !c.customer_id) return "skipped";
   const lines: string[] = Array.isArray(c.transcript) ? c.transcript : [];
   const text = lines.join("\n");
@@ -75,7 +75,7 @@ export async function captureBookingFromCall(callId: string, chat?: ChatFn): Pro
   const inserted = await one(
     `INSERT INTO bookings (org_id, call_id, customer_id, lead_id, connector, job_type, starts_at, ends_at, value_cents, idempotency_key)
      VALUES ($1, $2, $3, $4, 'native', $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING RETURNING id`,
-    [org.id, c.id, c.customer_id, c.lead_id, svc?.name || cap.service || "Appointment", start, end, svc?.valueCents || 0, `capture:${c.id}`]
+    [org.id, c.id, c.customer_id, c.lead_id, jobName(svc?.name, cap.service, c.extraction?.service_requested), start, end, svc?.valueCents || 0, `capture:${c.id}`]
   );
   if (!inserted) return "none";
   if (cap.address) await q("UPDATE customers SET address = address || $2, updated_at = now() WHERE id = $1 AND (address->>'street') IS NULL", [c.customer_id, JSON.stringify({ street: cap.address })]);
@@ -83,4 +83,10 @@ export async function captureBookingFromCall(callId: string, chat?: ChatFn): Pro
   await q("UPDATE calls SET outcome = 'booked', updated_at = now() WHERE id = $1 AND (outcome IS NULL OR outcome IN ('unknown','info','callback'))", [c.id]);
   log.info({ callId, bookingId: inserted.id }, "booking captured from the call");
   return "booked";
+}
+
+/** The job's name: the matching service, else what was said on the call, else "Appointment". */
+export function jobName(service: string | undefined, said: string, requested: unknown): string {
+  const meaningful = (v: unknown) => { const t = String(v || "").trim(); return t && !/^(any|none|n\/a|unknown|-)$/i.test(t) ? t.slice(0, 80) : ""; };
+  return meaningful(service) || meaningful(said) || meaningful(requested) || "Appointment";
 }

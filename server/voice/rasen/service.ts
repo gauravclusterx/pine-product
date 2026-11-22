@@ -1243,20 +1243,84 @@ export async function issueTestCallToken(input: any, agentId: string): Promise<{
 
 // ─── Knowledge ───────────────────────────────────────────────────────────────
 
-/** Add a block of text to an agent's knowledge library (ingested asynchronously), keyed so a re-push replaces it. */
-export async function addAgentKnowledgeText(input: any, agentId: string, name: string, text: string, resourceKey?: string): Promise<any> {
-  const body: Record<string, any> = { type: "text", name: name.slice(0, 200), text };
-  if (resourceKey) body.resource_key = resourceKey;
-  return (await rasenRequest<any>(getRasenApiKey(input), "POST", `/agents/${enc(agentId)}/knowledge/sources`, { body, timeoutMs: 60_000 })).data;
+/**
+ * Knowledge (docs.rasen.ai/guides/knowledge): an agent answers from its knowledge library — web
+ * pages (HTTPS), text (≤ 262,144 chars) and documents (PDF, TXT, MD, DOCX ≤ 20 MiB). A source is
+ * ingested asynchronously (state pending → ingesting → ready | failed); publishing the agent
+ * freezes the library for new calls.
+ */
+export interface KnowledgeSource { id: string; name: string; kind: string; state: string; url: string | null; failure: string | null; relation: string | null; updatedAt: string | null; etag?: string | null }
+
+function mapSource(x: any): KnowledgeSource {
+  const src = x?.source || x;
+  return {
+    id: src?.id, name: src?.name || src?.url || "Source", kind: src?.kind || src?.type || "", state: src?.state || "pending",
+    url: src?.url || null, failure: src?.failure || src?.failure_reason || null, relation: x?.relation || src?.relation || null,
+    updatedAt: src?.updated_at || src?.created_at || null,
+  };
 }
 
-export async function uploadAgentKnowledgeFile(input: any, agentId: string, name: string, file: Buffer, filename: string): Promise<any> {
+export async function listAgentKnowledge(input: any, agentId: string): Promise<KnowledgeSource[]> {
+  return (await rasenListAll(getRasenApiKey(input), `/agents/${enc(agentId)}/knowledge/sources`, {}, 500)).map(mapSource);
+}
+
+/** Add a web page or a block of text to one agent's library (agent-owned). */
+export async function addAgentKnowledge(input: any, agentId: string, src: { kind: "url"; url: string; name?: string } | { kind: "text"; text: string; name: string }, resourceKey?: string): Promise<KnowledgeSource> {
+  const body: Record<string, any> = src.kind === "url"
+    ? { kind: "url", url: src.url, name: (src.name || src.url).slice(0, 200) }
+    : { kind: "text", text: src.text.slice(0, 262_144), name: src.name.slice(0, 200) };
+  if (resourceKey) body.resource_key = resourceKey.slice(0, 120);
+  return mapSource((await rasenRequest<any>(getRasenApiKey(input), "POST", `/agents/${enc(agentId)}/knowledge/sources`, { body, timeoutMs: 60_000 })).data);
+}
+
+/** Kept for the knowledge push of the brief: text, keyed so a re-push replaces it. */
+export async function addAgentKnowledgeText(input: any, agentId: string, name: string, text: string, resourceKey?: string): Promise<any> {
+  return addAgentKnowledge(input, agentId, { kind: "text", text, name }, resourceKey);
+}
+
+export async function uploadAgentKnowledgeFile(input: any, agentId: string, name: string, file: Buffer, filename: string): Promise<KnowledgeSource> {
   const form = new FormData();
   form.append("name", name.slice(0, 200));
   form.append("file", file, { filename });
-  return (await rasenRequest<any>(getRasenApiKey(input), "POST", `/agents/${enc(agentId)}/knowledge/sources/upload`, {
+  return mapSource((await rasenRequest<any>(getRasenApiKey(input), "POST", `/agents/${enc(agentId)}/knowledge/sources/upload`, {
     body: form, headers: form.getHeaders(), timeoutMs: 120_000,
-  })).data;
+  })).data);
+}
+
+export async function getKnowledgeSource(input: any, sourceId: string): Promise<KnowledgeSource> {
+  const r = await rasenRequest<any>(getRasenApiKey(input), "GET", `/knowledge/sources/${enc(sourceId)}`);
+  return { ...mapSource(r.data), etag: r.etag || null };
+}
+
+/** Take a source out of the agent's library (shared: detach; owned: archive it). */
+export async function removeAgentKnowledge(input: any, agentId: string, sourceId: string, relation: string | null): Promise<void> {
+  const key = getRasenApiKey(input);
+  if (relation === "shared") await rasenRequest(key, "DELETE", `/agents/${enc(agentId)}/knowledge/sources/${enc(sourceId)}`);
+  else await rasenRequest(key, "POST", `/knowledge/sources/${enc(sourceId)}/archive`);
+}
+
+/** Fetch the page again (a website changed). */
+export async function refreshKnowledgeSource(input: any, sourceId: string): Promise<KnowledgeSource> {
+  const key = getRasenApiKey(input);
+  const cur = await rasenRequest<any>(key, "GET", `/knowledge/sources/${enc(sourceId)}`);
+  return mapSource((await rasenRequest<any>(key, "POST", `/knowledge/sources/${enc(sourceId)}/reingest`, { ifMatch: cur.etag, timeoutMs: 60_000 })).data);
+}
+
+// ─── Versions ────────────────────────────────────────────────────────────────
+
+export async function listAgentVersions(input: any, agentId: string): Promise<Array<{ id: string; number: number; createdAt: string | null; live: boolean }>> {
+  const key = getRasenApiKey(input);
+  const agent = (await rasenRequest<any>(key, "GET", `/agents/${enc(agentId)}`)).data;
+  const rows = await rasenListAll(key, `/agents/${enc(agentId)}/versions`, {}, 100);
+  return rows.map((v: any) => ({ id: v.id, number: Number(v.number) || 0, createdAt: v.created_at || null, live: v.id === agent?.live_version_id }));
+}
+
+/** Put an earlier published version back live (the provider checks we saw the current live one). */
+export async function rollbackAgent(input: any, agentId: string, versionId: string): Promise<string | null> {
+  const key = getRasenApiKey(input);
+  const agent = (await rasenRequest<any>(key, "GET", `/agents/${enc(agentId)}`)).data;
+  const r = await rasenRequest<any>(key, "POST", `/agents/${enc(agentId)}/rollback`, { body: { version_id: versionId, expected_live_version_id: agent?.live_version_id }, timeoutMs: 60_000 });
+  return r.data?.live_version_id || versionId;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

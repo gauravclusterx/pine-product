@@ -23,6 +23,7 @@ import { orgBilling, requireCurrentSubscription } from "../modules/billing.js";
 import { billingRouter, createCustomerWorkspace } from "./billing.js";
 import { crmRouter } from "./crm.js";
 import { aiRouter } from "./ai.js";
+import { knowledgeRouter } from "./knowledge.js";
 import { dashboard, platformOverview, platformUsage, usage } from "../modules/stats.js";
 import { translateCall, translationAvailable } from "../modules/translate.js";
 import { CHANNELS, CRM_CONNECTORS, connectorContext, deleteIntegration, listIntegrations, markIntegration, rotateInboundKey, saveIntegration, saveIntegrationSchema } from "../hub/registry.js";
@@ -113,6 +114,7 @@ apiRouter.use(requireCurrentSubscription(["/auth/", "/billing", "/org"]));
 apiRouter.use(billingRouter);
 apiRouter.use(crmRouter);
 apiRouter.use(aiRouter);
+apiRouter.use(knowledgeRouter);
 
 apiRouter.get("/auth/me", h(async (req, res) => {
   const a = req.auth!;

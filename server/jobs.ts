@@ -15,6 +15,7 @@ import { createWorker, enqueue, PermanentJobError, type Handler, type Worker } f
 import { getOrg, findOrg, leadAgentFor } from "./modules/orgs.js";
 import { placeCall } from "./modules/outbound.js";
 import { finaliseCall, ingestCall } from "./modules/calls.js";
+import * as agentsModule from "./modules/agents.js";
 import { analyseCall } from "./modules/callAnalysis.js";
 import { captureBookingFromCall } from "./modules/bookingCapture.js";
 import { leadVariables } from "./intake/leads.js";
@@ -57,6 +58,23 @@ export const handlers: Record<string, Handler> = {
   },
 
   "call.finalise": async (job) => { await finaliseCall(job.payload.callId); },
+
+  /** Publish an agent once every knowledge source has finished ingesting (website → agent ready). */
+  "agent.knowledge_publish": async (job) => {
+    const org = await getOrg(job.orgId!);
+    const agent = await agentsModule.getAgent(org.id, job.payload.agentId).catch(() => null);
+    if (!agent || agent.status === "archived" || !agent.providerAgentId) return;
+    const ws = await findVoiceWorkspace(org.id);
+    if (!ws) return;
+    const sources = await rasen.listAgentKnowledge(ws, agent.providerAgentId);
+    const busy = sources.some((x) => ["pending", "ingesting"].includes(x.state));
+    const tries = Number(job.payload.tries || 0);
+    if (busy && tries < 45) {
+      await enqueue("agent.knowledge_publish", { agentId: agent.id, tries: tries + 1 }, { orgId: org.id, runAt: new Date(Date.now() + 20_000), dedupeKey: `kb-publish:${agent.id}:try${tries + 1}` });
+      return;
+    }
+    await agentsModule.publishAgent(org, agent.id);
+  },
 
   /** After an AI key is saved: analyse the last week's calls that have no outcome or no captured booking. */
   "ai.backfill": async (job) => {

@@ -5,12 +5,12 @@
  * business profile, the contact's history and the recent thread, and sent as SMS — which takes
  * 1 message credit (refused at 0, refunded if the send fails).
  */
-import { one, q } from "../db/pool.js";
+import { q } from "../db/pool.js";
 import { log } from "../lib/logger.js";
 import type { Org } from "./orgs.js";
 import { recordMessage } from "./messages.js";
 import { aiAvailable, chatFor, type ChatFn } from "./ai.js";
-import { findCustomerByPhone, upsertCustomer } from "./customers.js";
+import { buildCustomerMemory, findCustomerByPhone, upsertCustomer } from "./customers.js";
 import { sendSms } from "../hub/notify.js";
 import type { HttpFn } from "../hub/types.js";
 import { fetchHttp } from "../hub/http.js";
@@ -32,13 +32,14 @@ export async function handleInboundSms(org: Org, from: string, body: string, dep
 
   const customer = await findCustomerByPhone(org.id, from);
   const thread = await q("SELECT direction, body FROM messages WHERE org_id = $1 AND phone_e164 = $2 ORDER BY created_at DESC LIMIT 12", [org.id, from]);
-  const lastCall = await one("SELECT summary, started_at FROM calls WHERE org_id = $1 AND phone_e164 = $2 AND summary <> '' ORDER BY started_at DESC LIMIT 1", [org.id, from]);
+  const memory = await buildCustomerMemory(org, customer);
   const services = (org.settings.services || []).map((s) => s.name).join(", ");
   const system = [
     `You are the text-message assistant of ${org.name}, a home-service business (${org.industry.replace(/_/g, " ")}). Time zone: ${org.timezone}.`,
     services ? `Services: ${services}.` : "",
     customer?.name ? `You are texting ${customer.name}.` : "",
-    lastCall ? `Last phone call (${new Date(lastCall.started_at).toDateString()}): ${lastCall.summary}` : "",
+    memory.profile ? `What we know about this customer:\n${memory.profile}` : "",
+    memory.context ? `History across calls and messages:\n${memory.context}` : "",
     org.settings.smsAgent.instructions ? `Owner's instructions: ${org.settings.smsAgent.instructions}` : "",
     "Reply in one or two short, friendly sentences, in the customer's language. Never invent prices, dates or promises. If they want to book or need a person, say the team will call them shortly.",
   ].filter(Boolean).join("\n");
