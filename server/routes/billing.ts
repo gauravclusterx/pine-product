@@ -163,7 +163,7 @@ billingRouter.get("/admin/customers/:id", requirePlatformAdmin, h(async (req, re
     q("SELECT u.id, u.email, u.name, m.role, u.last_login_at, u.disabled FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = $1 ORDER BY m.role DESC, u.email", [id]),
     q("SELECT id, kind, provider, amount_minor, currency, status, voice_credits, chat_credits, period_end, note, created_at FROM payments WHERE org_id = $1 ORDER BY created_at DESC LIMIT 50", [id]),
     q("SELECT kind, delta, reason, ref, created_at FROM wallet_ledger WHERE org_id = $1 ORDER BY created_at DESC LIMIT 50", [id]),
-    one("SELECT workspace_id, created_at FROM voice_workspaces WHERE org_id = $1", [id]),
+    one("SELECT workspace_id, connected_at, (webhook_secret_enc IS NOT NULL) AS webhook_secret_set FROM voice_workspaces WHERE org_id = $1", [id]),
     one(`SELECT count(*)::int AS calls, COALESCE(sum(billed_credits), 0)::float AS minutes, count(*) FILTER (WHERE outcome = 'booked')::int AS booked
          FROM calls WHERE org_id = $1 AND started_at >= date_trunc('month', now())`, [id]),
   ]);

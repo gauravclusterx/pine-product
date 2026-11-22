@@ -21,6 +21,8 @@ export function AdminCustomers() {
   const [open, setOpen] = useState<string | null>(null);
   const [create, setCreate] = useState(false);
   const [find, setFind] = useState("");
+  const [keyFor, setKeyFor] = useState<any>(null);
+  const qc = useQueryClient();
   if (q.isLoading) return <Loading />;
   if (q.error) return <ErrorNote error={q.error} />;
   const rows = (q.data.customers as any[]).filter((c) => !find || `${c.name} ${c.owner_email || ""}`.toLowerCase().includes(find.toLowerCase()));
@@ -31,7 +33,7 @@ export function AdminCustomers() {
       <div className="relative mb-4 max-w-sm"><Search className="h-4 w-4 absolute left-3 top-3 text-ink-mute" /><input className="input pl-9" placeholder="Search name or email" value={find} onChange={(e) => setFind(e.target.value)} /></div>
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[980px]">
-          <thead><tr><th className="th">Customer</th><th className="th">Plan</th><th className="th text-right">Price</th><th className="th text-right">Voice credits</th><th className="th text-right">Msg credits</th><th className="th text-right">Calls (month)</th><th className="th">Voice</th><th className="th">Last login</th></tr></thead>
+          <thead><tr><th className="th">Customer</th><th className="th">Plan</th><th className="th text-right">Price</th><th className="th text-right">Voice credits</th><th className="th text-right">Msg credits</th><th className="th text-right">Calls (month)</th><th className="th">Rasen API key</th><th className="th">Last login</th></tr></thead>
           <tbody>{rows.map((c) => (
             <tr key={c.id} onClick={() => setOpen(c.id)} className="cursor-pointer hover:bg-white/[0.04]">
               <td className="td"><div className="font-medium text-ink">{c.name}</div><div className="text-xs text-ink-mute">{c.owner_email || "no owner"}</div></td>
@@ -40,7 +42,8 @@ export function AdminCustomers() {
               <td className="td text-right tabular-nums">{credits(c.wallet_voice)}</td>
               <td className="td text-right tabular-nums">{credits(c.wallet_chat)}</td>
               <td className="td text-right tabular-nums">{c.calls_month} <span className="text-ink-mute text-xs">({credits(c.minutes_month)} min)</span></td>
-              <td className="td">{c.voice_connected ? <StatusChip status="connected" /> : <span className="chip bg-warn-wash text-warn">not connected</span>}</td>
+              <td className="td whitespace-nowrap">{c.voice_connected ? <StatusChip status="connected" /> : <span className="chip bg-warn-wash text-warn">not connected</span>}
+                <button className="btn-line btn-sm ml-2" onClick={(e) => { e.stopPropagation(); setKeyFor(c); }}>{c.voice_connected ? "Change key" : "Connect key"}</button></td>
               <td className="td text-xs text-ink-mute">{c.last_login_at ? when(c.last_login_at) : "never"}</td>
             </tr>
           ))}</tbody>
@@ -48,7 +51,8 @@ export function AdminCustomers() {
         {!rows.length && <div className="p-10 text-center text-sm text-ink-mute">No customers.</div>}
       </div>
       {open && <CustomerPanel id={open} onClose={() => setOpen(null)} />}
-      <NewClient open={create} onClose={() => setCreate(false)} />
+      <NewClient open={create} onClose={() => { setCreate(false); qc.invalidateQueries({ queryKey: ["admin-customers"] }); }} />
+      {keyFor && <VoiceKey org={keyFor} onClose={() => { setKeyFor(null); qc.invalidateQueries({ queryKey: ["admin-customers"] }); }} />}
     </div>
   );
 }
@@ -125,7 +129,7 @@ function CustomerPanel({ id, onClose }: { id: string; onClose: () => void }) {
         </Section>
 
         <Section title="Voice workspace (Rasen)">
-          <p className="text-sm text-ink-soft">{voice ? <>Connected · workspace <code className="text-xs">{voice.workspace_id}</code> since {when(voice.created_at, { dateStyle: "medium" })}</> : "Not connected — calls cannot be placed or received."}</p>
+          <p className="text-sm text-ink-soft">{voice ? <>Connected · workspace <code className="text-xs">{voice.workspace_id}</code> since {when(voice.connected_at, { dateStyle: "medium" })}{voice.webhook_secret_set ? " · webhook secret set" : ""}</> : "Not connected — calls cannot be placed or received."}</p>
           <button className="btn-line btn-sm mt-3" onClick={() => setVoiceKey(true)}>{voice ? "Replace API key" : "Connect API key"}</button>
         </Section>
 

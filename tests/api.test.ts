@@ -334,6 +334,10 @@ describe("subscription paywall and billing", () => {
     const add = await admin.agent.put(`/api/admin/customers/${orgId}/credits`).set(admin.csrf).send({ mode: "add", voice: 5 });
     expect(add.body.wallet).toEqual({ voice: 55, chat: 20 });
     expect((await owner.agent.put(`/api/admin/customers/${orgId}/credits`).set(owner.csrf).send({ mode: "add", voice: 5 })).status).toBe(403);
+    const one_ = await admin.agent.get(`/api/admin/customers/${orgId}`);
+    expect(one_.status).toBe(200);
+    expect(one_.body.voice).toMatchObject({ webhook_secret_set: expect.any(Boolean) });
+    expect(one_.body.members[0]).toMatchObject({ role: "owner" });
     const list = await admin.agent.get("/api/admin/customers");
     expect(list.body.customers.find((c: any) => c.id === orgId)).toMatchObject({ wallet_voice: 55, wallet_chat: 20 });
   });
