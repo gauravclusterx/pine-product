@@ -53,6 +53,12 @@ export const settingsSchema = z.object({
   transferNumber: z.string().max(20).default(""),
   /** Outbound caller id: a phone number id or E.164 ("" = the agent's own number). */
   outboundNumber: z.string().max(40).default(""),
+  /** SMS agent: AI replies to customers who text the business number (1 message credit per reply). */
+  smsAgent: z.object({
+    enabled: z.boolean().default(false),
+    /** What the agent should know or do, in the owner's words. */
+    instructions: z.string().max(4000).default(""),
+  }).prefault({}),
 });
 
 export type OrgSettings = z.infer<typeof settingsSchema>;

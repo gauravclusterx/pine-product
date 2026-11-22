@@ -7,6 +7,7 @@ import { q } from "../db/pool.js";
 import { log } from "../lib/logger.js";
 import { getIntegration } from "./registry.js";
 import { addCredits, charge } from "../modules/billing.js";
+import { recordMessage, type Author } from "../modules/messages.js";
 import { fetchHttp } from "./http.js";
 import type { HttpFn } from "./types.js";
 
@@ -16,7 +17,7 @@ async function isDnc(orgId: string, phone: string): Promise<boolean> {
   return (await q("SELECT 1 FROM dnc_list WHERE org_id = $1 AND phone_e164 = $2", [orgId, phone])).length > 0;
 }
 
-export async function sendSms(orgId: string, to: string, body: string, http: HttpFn = fetchHttp): Promise<SendResult> {
+export async function sendSms(orgId: string, to: string, body: string, http: HttpFn = fetchHttp, opts: { author?: Author } = {}): Promise<SendResult> {
   if (await isDnc(orgId, to)) return { sent: false, channel: "sms", detail: "the number has opted out" };
   const tw = await getIntegration(orgId, "twilio");
   if (!tw || tw.status === "disabled") return { sent: false, channel: "sms", detail: "SMS is not connected" };
@@ -37,6 +38,7 @@ export async function sendSms(orgId: string, to: string, body: string, http: Htt
   }
   await q("INSERT INTO audit_log (org_id, action, detail) VALUES ($1, 'sms.send', $2)", [orgId, JSON.stringify({ to: to.slice(-4), ok, status: res.status })]);
   if (!ok) await addCredits(orgId, 0, 1, "sms.refund");
+  await recordMessage({ orgId, phone: to, direction: "out", body: body.slice(0, 1500), author: opts.author || "system", status: ok ? "sent" : "failed", providerId: res.data?.sid || null, error: ok ? null : String(res.data?.message || res.status) }).catch((err) => log.warn({ err: err.message }, "could not record sms"));
   if (!ok) log.warn({ orgId, status: res.status, code: res.data?.code }, "sms failed");
   return { sent: ok, channel: "sms", detail: ok ? "sent" : `Twilio ${res.status}: ${res.data?.message || "error"}` };
 }

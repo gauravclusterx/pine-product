@@ -61,6 +61,7 @@ export async function acceptLead(org: Org, raw: LeadInput): Promise<AcceptResult
           consentAt: input.consent ? input.receivedAt || new Date() : null, consentSource: input.consent ? input.source : null,
         }, t)
       : null;
+    if (customer && !customer.source) await t("UPDATE customers SET source = $2 WHERE id = $1 AND source = ''", [customer.id, input.source]);
     const rows = await t(
       `INSERT INTO leads (org_id, source, source_ref, customer_id, name, phone_e164, email, service, postal_code, message, payload, status, reject_reason, received_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)

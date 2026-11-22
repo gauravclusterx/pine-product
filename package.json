@@ -21,6 +21,7 @@
     "dev:all": "npm run build && npm run dev"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.12.0",
     "axios": "^1.21.1",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",

@@ -21,6 +21,8 @@ import { acceptLead, leadInputSchema, listLeads } from "../intake/leads.js";
 import * as campaigns from "../modules/campaigns.js";
 import { orgBilling, requireCurrentSubscription } from "../modules/billing.js";
 import { billingRouter, createCustomerWorkspace } from "./billing.js";
+import { crmRouter } from "./crm.js";
+import { aiRouter } from "./ai.js";
 import { dashboard, platformOverview, platformUsage, usage } from "../modules/stats.js";
 import { translateCall, translationAvailable } from "../modules/translate.js";
 import { CHANNELS, CRM_CONNECTORS, connectorContext, deleteIntegration, listIntegrations, markIntegration, rotateInboundKey, saveIntegration, saveIntegrationSchema } from "../hub/registry.js";
@@ -109,6 +111,8 @@ apiRouter.use(requireAuth);
 // Suspended or unpaid (paywall on) clients reach only sign-in, billing and their workspace profile.
 apiRouter.use(requireCurrentSubscription(["/auth/", "/billing", "/org"]));
 apiRouter.use(billingRouter);
+apiRouter.use(crmRouter);
+apiRouter.use(aiRouter);
 
 apiRouter.get("/auth/me", h(async (req, res) => {
   const a = req.auth!;
@@ -215,7 +219,7 @@ const manager = requireRole("manager");
 const owner = requireRole("owner");
 
 apiRouter.get("/org", viewer, h(async (req, res) => {
-  res.json({ org: await org(req), voice: await voiceStatus(req.auth!.orgId), webhookUrl: webhookUrl(), translation: translationAvailable() });
+  res.json({ org: await org(req), voice: await voiceStatus(req.auth!.orgId), webhookUrl: webhookUrl(), translation: await translationAvailable(req.auth!.orgId) });
 }));
 
 apiRouter.patch("/org", manager, h(async (req, res) => {
@@ -376,48 +380,6 @@ apiRouter.post("/calls", manager, h(async (req, res) => {
 
 // ── customers, leads, bookings ────────────────────────────────────────────────
 
-apiRouter.get("/customers", viewer, h(async (req, res) => {
-  const { limit, offset } = paging(req.query);
-  const s = String(req.query.q || "").trim();
-  const like = `%${s.replace(/[%_\\]/g, "\\$&")}%`;
-  res.json({ customers: await q(
-    `SELECT c.id, c.name, c.phone_e164, c.email, c.address, c.connector, c.consent_at, c.created_at,
-       (SELECT max(started_at) FROM calls x WHERE x.customer_id = c.id) AS last_call_at,
-       (SELECT count(*)::int FROM calls x WHERE x.customer_id = c.id) AS calls
-     FROM customers c WHERE c.org_id = $1 AND ($2 = '' OR c.name ILIKE $3 OR c.phone_e164 LIKE $3 OR c.email ILIKE $3)
-     ORDER BY c.updated_at DESC LIMIT $4 OFFSET $5`, [req.auth!.orgId, s, like, limit, offset]) });
-}));
-
-apiRouter.get("/customers/:id", viewer, h(async (req, res) => {
-  const id = parse(uuid, P(req).id);
-  const c = await getCustomer(req.auth!.orgId, id);
-  if (!c) throw notFound("Customer not found.");
-  const [calls, bookings, leads] = await Promise.all([
-    q("SELECT id, direction, started_at, duration_seconds, outcome, summary, qa_score FROM calls WHERE org_id = $1 AND customer_id = $2 ORDER BY started_at DESC LIMIT 50", [req.auth!.orgId, id]),
-    q("SELECT id, job_type, starts_at, ends_at, status, connector FROM bookings WHERE org_id = $1 AND customer_id = $2 ORDER BY starts_at DESC LIMIT 50", [req.auth!.orgId, id]),
-    q("SELECT id, source, service, status, received_at FROM leads WHERE org_id = $1 AND customer_id = $2 ORDER BY received_at DESC LIMIT 50", [req.auth!.orgId, id]),
-  ]);
-  const dnc = !!(await one("SELECT 1 AS x FROM dnc_list WHERE org_id = $1 AND phone_e164 = $2", [req.auth!.orgId, c.phone]));
-  res.json({ customer: c, calls, bookings, leads, dnc });
-}));
-
-apiRouter.patch("/customers/:id", manager, h(async (req, res) => {
-  const patch = parse(z.object({ name: z.string().max(120).optional(), email: z.string().max(200).optional(), notes: z.string().max(4000).optional(), address: z.record(z.string(), z.string().max(200)).optional() }), req.body);
-  const c = await updateCustomer(req.auth!.orgId, parse(uuid, P(req).id), patch);
-  if (!c) throw notFound("Customer not found.");
-  res.json({ customer: c });
-}));
-
-apiRouter.get("/leads", viewer, h(async (req, res) => {
-  const { limit, offset } = paging(req.query);
-  res.json({ leads: await listLeads(req.auth!.orgId, { status: req.query.status ? String(req.query.status) : undefined, source: req.query.source ? String(req.query.source) : undefined }, limit, offset) });
-}));
-
-apiRouter.post("/leads", manager, h(async (req, res) => {
-  const input = parse(leadInputSchema.omit({ source: true, sourceRef: true }), req.body);
-  res.status(201).json(await acceptLead(await org(req), { ...input, source: "manual", sourceRef: `manual:${req.auth!.userId}:${Date.now()}` }));
-}));
-
 apiRouter.get("/bookings", viewer, h(async (req, res) => {
   const from = req.query.from ? new Date(String(req.query.from)) : new Date(Date.now() - 7 * 86_400_000);
   const to = req.query.to ? new Date(String(req.query.to)) : new Date(Date.now() + 30 * 86_400_000);
@@ -468,7 +430,7 @@ apiRouter.get("/integrations", viewer, h(async (req, res) => {
     integrations: list,
     endpoints: {
       angi: `${base}/api/intake/angi/<key>`, thumbtack: `${base}/api/intake/thumbtack/<key>`, web_form: `${base}/api/intake/web_form/<key>`,
-      email_parse: `${base}/api/intake/email_parse/<key>`, meta: `${base}/api/intake/meta/${req.auth!.orgId}`, yelp: `${base}/api/intake/yelp/<key>`,
+      email_parse: `${base}/api/intake/email_parse/<key>`, twilio: `${base}/api/webhooks/sms/<key>`, meta: `${base}/api/intake/meta/${req.auth!.orgId}`, yelp: `${base}/api/intake/yelp/<key>`,
     },
   });
 }));

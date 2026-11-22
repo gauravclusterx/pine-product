@@ -5,7 +5,7 @@ import { useSession } from "../lib/session";
 import { Logo } from "../components/Layout";
 
 const ERRORS: Record<string, string> = {
-  not_allowed: "This Google account is not on Pine AI yet. Staff sign in with a clusterx.ai or rasen.ai account; clients use the email their Pine AI contact added.",
+  not_allowed: "Login restricted. Contact support.",
   not_verified: "Google did not confirm this email address. Try another account.",
   disabled: "This account has been switched off. Ask your Pine AI contact.",
   cancelled: "Sign-in was cancelled.",
@@ -46,9 +46,7 @@ export default function Login() {
             className={`mt-8 flex h-12 w-full items-center justify-center gap-3 rounded-full bg-ink text-[#0B1409] font-medium transition hover:bg-white ${opts.data?.google === false ? "pointer-events-none opacity-50" : ""}`}>
             <GoogleMark /> Continue with Google
           </a>
-          <p className="text-xs text-ink-mute mt-5 leading-relaxed">
-            Pine AI staff use their {(opts.data?.domains || ["clusterx.ai", "rasen.ai"]).map((d) => `@${d}`).join(" or ")} Google account. Clients sign in with the Google account of the email their Pine AI contact added.
-          </p>
+          <p className="text-xs text-ink-mute mt-5 leading-relaxed">Access is by invitation. Need help? Contact support.</p>
         </div>
         <p className="text-xs text-ink-mute">By signing in you agree to the <a className="underline hover:text-ink" href="/terms">Terms</a> and <a className="underline hover:text-ink" href="/privacy">Privacy Policy</a>.</p>
       </div>

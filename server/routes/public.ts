@@ -24,6 +24,7 @@ import { TOOL_SECRET_HEADER } from "../modules/agents.js";
 import { integrationByInboundKey, getIntegration } from "../hub/registry.js";
 import { fetchHttp } from "../hub/http.js";
 import { acceptLead } from "../intake/leads.js";
+import { handleInboundSms } from "../modules/smsAgent.js";
 import { fetchMetaLead, fetchYelpLead, fromAngi, fromThumbtack, fromWebForm, metaLeadIds, parseLeadEmail, verifyMetaSignature } from "../intake/sources.js";
 
 export const publicRouter = Router();
@@ -127,6 +128,22 @@ publicRouter.post("/intake/:source/:key", h(async (req, res, next) => {
   if (!lead.sourceRef) return res.status(400).json({ error: "the lead has no id" });
   const r = await acceptLead(org, lead);
   res.status(r.duplicate ? 200 : 201).json(r);
+}));
+
+// Inbound SMS (Twilio "A message comes in" webhook, form-encoded). The URL key identifies the
+// business; the reply, if any, is sent through the REST API, so Twilio gets an empty TwiML answer.
+publicRouter.post("/webhooks/sms/:key", h(async (req, res) => {
+  const integ = await integrationByInboundKey("twilio", String(P(req).key || ""));
+  if (!integ) return res.status(401).json({ error: "unknown key" });
+  const org = await findOrg(integ.orgId);
+  if (!org) return res.status(404).json({ error: "unknown" });
+  const from = String(req.body?.From || "").trim();
+  const body = String(req.body?.Body || "").trim();
+  if (from && body) {
+    // Answer Twilio at once; the AI reply can take a few seconds.
+    handleInboundSms(org, from, body).catch((err) => log.warn({ err: err.message }, "inbound sms failed"));
+  }
+  res.type("text/xml").send("<Response></Response>");
 }));
 
 // Meta: subscription check, then signed leadgen notifications (ids only).

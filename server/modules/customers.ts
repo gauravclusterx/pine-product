@@ -15,6 +15,7 @@ export interface Customer {
   id: string; orgId: string; name: string; phone: string; email: string; address: Record<string, any>;
   externalId: string | null; connector: string | null; notes: string; consentAt: Date | null; consentSource: string | null;
   crmSnapshot: Record<string, any>; createdAt: Date;
+  stage: "lead" | "customer"; status: string; statusLocked: boolean; tags: string[]; source: string; updatedAt: Date;
 }
 
 export function toCustomer(r: any): Customer {
@@ -22,6 +23,7 @@ export function toCustomer(r: any): Customer {
     id: r.id, orgId: r.org_id, name: r.name, phone: r.phone_e164, email: r.email, address: r.address || {},
     externalId: r.external_id, connector: r.connector, notes: r.notes, consentAt: r.consent_at, consentSource: r.consent_source,
     crmSnapshot: r.crm_snapshot || {}, createdAt: r.created_at,
+    stage: r.stage || "lead", status: r.status || "fresh", statusLocked: !!r.status_locked, tags: r.tags || [], source: r.source || "", updatedAt: r.updated_at,
   };
 }
 
@@ -64,15 +66,26 @@ export async function upsertCustomer(
   return toCustomer(rows[0]);
 }
 
-/** Staff edits are authoritative: they replace what is there. */
-export async function updateCustomer(orgId: string, id: string, patch: Partial<{ name: string; email: string; notes: string; address: Record<string, any> }>): Promise<Customer | null> {
+export const customerPatchFields = ["name", "phone", "email", "notes", "address", "status", "stage", "tags"] as const;
+export type CustomerPatch = Partial<{ name: string; phone: string; email: string; notes: string; address: Record<string, any>; status: string; stage: "lead" | "customer"; tags: string[] }>;
+
+/** Staff edits are authoritative: they replace what is there. A status set by a person is locked. */
+export async function updateCustomer(orgId: string, id: string, patch: CustomerPatch): Promise<Customer | null> {
   const cur = await getCustomer(orgId, id);
   if (!cur) return null;
   const rows = await q(
-    "UPDATE customers SET name = $3, email = $4, notes = $5, address = $6, updated_at = now() WHERE org_id = $1 AND id = $2 RETURNING *",
-    [orgId, id, patch.name ?? cur.name, patch.email ?? cur.email, patch.notes ?? cur.notes, JSON.stringify(patch.address ?? cur.address)]
+    `UPDATE customers SET name = $3, email = $4, notes = $5, address = $6, phone_e164 = $7, status = $8, stage = $9, tags = $10,
+       status_locked = status_locked OR $11, updated_at = now() WHERE org_id = $1 AND id = $2 RETURNING *`,
+    [orgId, id, patch.name ?? cur.name, patch.email ?? cur.email, patch.notes ?? cur.notes, JSON.stringify(patch.address ?? cur.address),
+      patch.phone ?? cur.phone, patch.status ?? cur.status, patch.stage ?? cur.stage, patch.tags ?? cur.tags, patch.status !== undefined && patch.status !== cur.status]
   );
   return toCustomer(rows[0]);
+}
+
+/** Call analysis writes the outcome onto the contact (like the CRM), unless a person set the status. */
+export async function setStatusFromCall(customerId: string, outcome: string, run: Q = q): Promise<void> {
+  if (!outcome || outcome === "unknown") return;
+  await run("UPDATE customers SET status = $2, updated_at = now() WHERE id = $1 AND NOT status_locked", [customerId, outcome]);
 }
 
 const MAX_CONTEXT = 3500;

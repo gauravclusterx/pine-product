@@ -12,6 +12,7 @@ import { credits, cur, when } from "../lib/format";
 import { useSession } from "../lib/session";
 import { ErrorNote, Field, Loading, Modal, PageHeader, StatusChip, Toggle } from "../components/ui";
 import { NewClient, VoiceKey } from "./Admin";
+import { AiKeysForm } from "../components/AiKeysForm";
 
 const subTone = (c: any) => (c.suspended ? "failed" : c.active ? (c.subscription_status === "trial" ? "scheduled" : "active") : c.subscription_status === "inactive" ? "draft" : "paused");
 const subLabel = (c: any) => (c.suspended ? "suspended" : c.active ? c.subscription_status : c.subscription_status === "inactive" ? "no plan" : "expired");
@@ -133,6 +134,8 @@ function CustomerPanel({ id, onClose }: { id: string; onClose: () => void }) {
           <button className="btn-line btn-sm mt-3" onClick={() => setVoiceKey(true)}>{voice ? "Replace API key" : "Connect API key"}</button>
         </Section>
 
+        <div className="md:col-span-2"><Section title="AI keys (this customer)"><AiKeysForm endpoint={`/admin/customers/${id}/ai-keys`} note="Optional. Without its own key this customer uses the platform AI keys from Settings." /></Section></div>
+
         <Section title="Account">
           <Toggle checked={b.suspended} onChange={(v) => m.mutate(() => patch(`/admin/customers/${id}/billing`, { suspended: v }))} label={b.suspended ? "Suspended — blocked from the app" : "Active — not suspended"} />
           <div className="mt-4 space-y-1.5 text-sm">
@@ -216,6 +219,7 @@ export function AdminSettings() {
         <Field label="Starter voice credits for new customers"><input className="input" type="number" min={0} value={s.starterVoiceCredits} onChange={(e) => set("starterVoiceCredits", Number(e.target.value))} /></Field>
         <Field label="Starter message credits for new customers"><input className="input" type="number" min={0} value={s.starterChatCredits} onChange={(e) => set("starterChatCredits", Number(e.target.value))} /></Field>
       </div>
+      <div className="card p-5 mt-4"><h2 className="font-display text-2xl mb-1">AI keys</h2><AiKeysForm endpoint="/admin/ai-keys" note="Used for the SMS agent and transcript translation. Order: the customer's own key, then these. A new key is checked with the provider before it is saved." /></div>
       <div className="flex items-center gap-3 mt-4">
         <button className="btn-primary" disabled={!f || save.isPending} onClick={() => save.mutate(f)}>Save settings</button>
         <span className="text-xs text-ink-mute">Online payments (Razorpay): {q.data.paymentsOnline ? "connected" : "not set up — add RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET on the server"}</span>

@@ -22,10 +22,10 @@ export const CRM_CONNECTORS: Record<string, CrmConnector> = Object.fromEntries(
 export interface ChannelSpec { kind: string; label: string; group: "messaging" | "alerts" | "leads"; maturity: "live" | "unverified"; credentialFields: CredentialField[]; settingFields?: CredentialField[]; accessNote?: string; inbound?: boolean }
 export const CHANNELS: Record<string, ChannelSpec> = {
   twilio: {
-    kind: "twilio", label: "Twilio SMS", group: "messaging", maturity: "unverified",
+    kind: "twilio", label: "Twilio SMS", group: "messaging", maturity: "unverified", inbound: true,
     credentialFields: [{ key: "accountSid", label: "Account SID", required: true }, { key: "authToken", label: "Auth token", secret: true, required: true }],
     settingFields: [{ key: "messagingServiceSid", label: "Messaging Service SID", required: true }],
-    accessNote: "US texting needs A2P 10DLC brand + campaign registration (or toll-free verification) before any message is delivered.",
+    accessNote: "US texting needs A2P 10DLC brand + campaign registration (or toll-free verification) before any message is delivered. For replies and the SMS agent, set the number's \"A message comes in\" webhook in Twilio to the URL shown after connecting.",
   },
   slack: {
     kind: "slack", label: "Slack", group: "alerts", maturity: "unverified",

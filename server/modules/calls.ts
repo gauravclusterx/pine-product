@@ -11,7 +11,7 @@ import type { MappedExecution } from "../voice/rasen/mappers.js";
 import { enqueue } from "../queue/queue.js";
 import { agentByProviderId } from "./agents.js";
 import { getOrg } from "./orgs.js";
-import { upsertCustomer } from "./customers.js";
+import { setStatusFromCall, upsertCustomer } from "./customers.js";
 import { scoreCall } from "./qa.js";
 import { chargeUpTo, creditsForSeconds } from "./billing.js";
 
@@ -138,6 +138,7 @@ export async function ingestCall(m: MappedExecution, opts: { expectOrgId?: strin
 async function afterCallEnded(orgId: string, callId: string): Promise<void> {
   const c = await one("SELECT * FROM calls WHERE id = $1", [callId]);
   if (!c) return;
+  if (c.customer_id && c.outcome) await setStatusFromCall(c.customer_id, c.outcome);
   if (c.outcome === "opt_out" && c.phone_e164) {
     await q("INSERT INTO dnc_list (org_id, phone_e164, reason, source) VALUES ($1, $2, 'opt_out', 'call') ON CONFLICT DO NOTHING", [orgId, c.phone_e164]);
     await enqueue("voice.suppress", { phone: c.phone_e164 }, { orgId, dedupeKey: `suppress:${orgId}:${c.phone_e164}` });
