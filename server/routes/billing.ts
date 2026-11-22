@@ -44,6 +44,8 @@ export async function createCustomerWorkspace(userId: string, name: string, emai
   await tx(async (t) => {
     await t("INSERT INTO memberships (org_id, user_id, role) VALUES ($1, $2, 'owner') ON CONFLICT DO NOTHING", [org.id, userId]);
     await t("UPDATE orgs SET subscription_status = 'inactive', subscription_expires_at = NULL WHERE id = $1", [org.id]);
+    // Self sign-ups are Indian businesses today (Asia/Kolkata): national numbers get +91, not +1.
+    await t("UPDATE orgs SET settings = jsonb_set(settings, '{defaultCountryCode}', '\"91\"') WHERE id = $1", [org.id]);
     await addCredits(org.id, s.starterVoiceCredits, s.starterChatCredits, "starter", undefined, t);
   });
   await audit(org.id, userId, "org.self_signup", { email });

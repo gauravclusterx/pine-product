@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Languages, Loader2 } from "lucide-react";
-import { get, post } from "../lib/api";
+import { get, post , currentOrgId } from "../lib/api";
 import { duration, money, when } from "../lib/format";
 import { ErrorNote, Loading, OutcomeChip, PageHeader } from "../components/ui";
 
@@ -33,7 +33,7 @@ export default function CallDetail() {
         <div className="space-y-4">
           {c.summary && <div className="card p-5"><h2 className="font-semibold mb-2">Summary</h2><p className="text-sm text-ink-soft">{c.summary}</p></div>}
           {c.recording_available && (
-            <div className="card p-5"><h2 className="font-semibold mb-3">Recording</h2><audio controls preload="none" className="w-full" src={`/api/calls/${c.id}/recording`} /></div>
+            <div className="card p-5"><h2 className="font-semibold mb-3">Recording</h2><audio controls preload="none" className="w-full" src={`/api/calls/${c.id}/recording${currentOrgId() ? `?org=${currentOrgId()}` : ""}`} /></div>
           )}
           <div className="card p-5">
             <div className="flex items-center justify-between mb-3">
