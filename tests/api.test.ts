@@ -48,6 +48,7 @@ async function setupOrg(name: string, key: string) {
   const r = await admin.agent.post("/api/admin/orgs").set(admin.csrf).send({ name, industry: "hvac", timezone: "America/New_York", ownerEmail: `${name.split(" ")[0].toLowerCase()}@example.com`, rateCentsPerMinute: 30 });
   expect(r.status).toBe(201);
   const orgId = r.body.org.id;
+  await q("UPDATE orgs SET wallet_voice = 1000, wallet_chat = 1000 WHERE id = $1", [orgId]);
   const v = await admin.agent.put(`/api/admin/orgs/${orgId}/voice-key`).set(admin.csrf).send({ apiKey: key });
   expect(v.status).toBe(200);
   await q("UPDATE users SET password_hash = $2 WHERE email = $1", [r.body.owner.email || `${name.split(" ")[0].toLowerCase()}@example.com`, await hashPassword("Password123")]);
@@ -157,6 +158,9 @@ describe("call events", () => {
     expect((await webhook(evt)).body.duplicate).toBe(true);
     await webhook({ ...evt, id: "evt_other" });
     expect((await one("SELECT count(*)::int AS n, sum(charge_cents)::int AS s FROM calls"))).toMatchObject({ n: 1, s: 60 });
+    // Prepaid voice credits: 95 s = 1.58 credits, taken once (1000 → 998.42).
+    expect(Number(c!.billed_credits ?? (await one("SELECT billed_credits FROM calls WHERE provider_call_id = 'call_1'"))!.billed_credits)).toBe(1.58);
+    expect(Number((await one("SELECT wallet_voice FROM orgs WHERE id = $1", [orgId]))!.wallet_voice)).toBe(998.42);
     await createWorker({ handlers }).drain();
     const scored = await one("SELECT qa_score, qa FROM calls WHERE provider_call_id = 'call_1'");
     expect(scored!.qa_score).toBeGreaterThanOrEqual(80);
@@ -297,5 +301,40 @@ describe("dashboard and usage", () => {
     expect(u.body).toMatchObject({ calls: 2, minutes: 4, charge_cents: 120, rateCentsPerMinute: 30 });
     const p = await admin.agent.get("/api/admin/usage");
     expect(p.body.orgs.find((o: any) => o.id === orgId).charge_cents).toBe(120);
+  });
+});
+
+describe("subscription paywall and billing", () => {
+  it("with the paywall on, an unpaid client reaches only billing; staff can activate them", async () => {
+    const { orgId, owner } = await setupOrg("Paywall Plumbing", "ra_ok_p_0123456789");
+    await q("UPDATE orgs SET subscription_status = 'inactive', subscription_expires_at = NULL WHERE id = $1", [orgId]);
+    expect((await owner.agent.get("/api/dashboard")).status).toBe(200);
+    expect((await admin.agent.put("/api/admin/settings").set(admin.csrf).send({ paywallEnabled: true })).status).toBe(200);
+    expect((await owner.agent.get("/api/dashboard")).status).toBe(402);
+    const me = await owner.agent.get("/api/auth/me");
+    expect(me.body.billing).toMatchObject({ required: true, active: false });
+    expect((await owner.agent.get("/api/billing")).status).toBe(200);
+    // Staff are never blocked; they activate a month by hand.
+    const act = await admin.agent.post(`/api/admin/customers/${orgId}/activate`).set(admin.csrf).send({ months: 1, amount: 3499 });
+    expect(act.status).toBe(200);
+    expect(act.body).toMatchObject({ status: "active", active: true });
+    expect((await owner.agent.get("/api/dashboard")).status).toBe(200);
+    const pay = await admin.agent.get("/api/admin/payments");
+    expect(pay.body.payments[0]).toMatchObject({ org_id: orgId, provider: "manual", status: "success", amount_minor: 349900 });
+    // Suspension blocks the client whatever the subscription.
+    await admin.agent.patch(`/api/admin/customers/${orgId}/billing`).set(admin.csrf).send({ suspended: true });
+    expect((await owner.agent.get("/api/dashboard")).status).toBe(403);
+    await admin.agent.put("/api/admin/settings").set(admin.csrf).send({ paywallEnabled: false });
+  });
+
+  it("staff set and add credits; a client cannot reach admin billing", async () => {
+    const { orgId, owner } = await setupOrg("Credit Cooling", "ra_ok_c_0123456789");
+    const set = await admin.agent.put(`/api/admin/customers/${orgId}/credits`).set(admin.csrf).send({ mode: "set", voice: 50, chat: 20 });
+    expect(set.body.wallet).toEqual({ voice: 50, chat: 20 });
+    const add = await admin.agent.put(`/api/admin/customers/${orgId}/credits`).set(admin.csrf).send({ mode: "add", voice: 5 });
+    expect(add.body.wallet).toEqual({ voice: 55, chat: 20 });
+    expect((await owner.agent.put(`/api/admin/customers/${orgId}/credits`).set(owner.csrf).send({ mode: "add", voice: 5 })).status).toBe(403);
+    const list = await admin.agent.get("/api/admin/customers");
+    expect(list.body.customers.find((c: any) => c.id === orgId)).toMatchObject({ wallet_voice: 55, wallet_chat: 20 });
   });
 });

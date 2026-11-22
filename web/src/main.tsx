@@ -22,8 +22,11 @@ const Numbers = lazy(() => import("./pages/Numbers"));
 const Integrations = lazy(() => import("./pages/Integrations"));
 const SettingsPage = lazy(() => import("./pages/Settings"));
 const AdminOverview = lazy(() => import("./pages/Admin").then((m) => ({ default: m.AdminOverview })));
-const AdminClients = lazy(() => import("./pages/Admin").then((m) => ({ default: m.AdminClients })));
 const AdminSystem = lazy(() => import("./pages/Admin").then((m) => ({ default: m.AdminSystem })));
+const AdminCustomers = lazy(() => import("./pages/AdminBilling").then((m) => ({ default: m.AdminCustomers })));
+const AdminPayments = lazy(() => import("./pages/AdminBilling").then((m) => ({ default: m.AdminPayments })));
+const AdminSettings = lazy(() => import("./pages/AdminBilling").then((m) => ({ default: m.AdminSettings })));
+const BillingPage = lazy(() => import("./pages/Billing"));
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: false, retry: 1 } } });
 
@@ -50,11 +53,15 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="numbers" element={<Numbers />} />
                 <Route path="integrations" element={<Integrations />} />
                 <Route path="settings" element={<SettingsPage />} />
+                <Route path="billing" element={<BillingPage />} />
                 <Route path="admin" element={<Navigate to="/admin" replace />} />
               </Route>
               <Route path="/admin" element={<AdminLayout />}>
                 <Route index element={<AdminOverview />} />
-                <Route path="clients" element={<AdminClients />} />
+                <Route path="customers" element={<AdminCustomers />} />
+                <Route path="clients" element={<Navigate to="/admin/customers" replace />} />
+                <Route path="payments" element={<AdminPayments />} />
+                <Route path="settings" element={<AdminSettings />} />
                 <Route path="system" element={<AdminSystem />} />
               </Route>
               <Route path="*" element={<Navigate to="/app" replace />} />

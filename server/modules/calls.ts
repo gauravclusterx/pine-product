@@ -13,6 +13,7 @@ import { agentByProviderId } from "./agents.js";
 import { getOrg } from "./orgs.js";
 import { upsertCustomer } from "./customers.js";
 import { scoreCall } from "./qa.js";
+import { chargeUpTo, creditsForSeconds } from "./billing.js";
 
 const NO_CONTACT = new Set(["busy", "no_answer", "rejected", "invalid_number", "carrier_failed", "never_connected", "voicemail"]);
 
@@ -115,6 +116,15 @@ export async function ingestCall(m: MappedExecution, opts: { expectOrgId?: strin
         [row.id, billable, chargeFor(billable, org.rateCentsPerMinute)]
       );
       if (c[0]) charged = c[0].charge_cents;
+      // Prepaid voice credits (CRM model): exact minutes, minimum 1 for a connected call, once per call.
+      const credits = creditsForSeconds(billable);
+      if (c[0] && credits > 0) {
+        const claimed = await t("UPDATE calls SET billed_credits = $2 WHERE id = $1 AND billed_credits IS NULL RETURNING id", [row.id, credits]);
+        if (claimed[0]) {
+          const taken = await chargeUpTo(org.id, "voice", credits, "call", row.id, t);
+          if (taken < credits) log.warn({ orgId: org.id, callId: row.id, credits, taken }, "voice credits ran out during a call");
+        }
+      }
     }
     return { id: row.id, created: row.created, charged, prevEnded: prev?.status === "ended" };
   });

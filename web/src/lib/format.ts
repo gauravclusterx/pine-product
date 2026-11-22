@@ -60,3 +60,10 @@ export function moneyShort(cents: number | null | undefined): string {
   if (a >= 1_000) return `$${(v / 1_000).toFixed(a >= 100_000 ? 0 : 1).replace(/\.0$/, "")}k`;
   return `$${Math.round(v)}`;
 }
+
+/** Amount in a currency (whole units, not cents): ₹3,499 / $49 / £29. */
+export function cur(amount: number | null | undefined, currency = "INR"): string {
+  if (amount == null) return "—";
+  return new Intl.NumberFormat(currency === "INR" ? "en-IN" : currency === "GBP" ? "en-GB" : "en-US", { style: "currency", currency, maximumFractionDigits: amount % 1 === 0 ? 0 : 2 }).format(amount);
+}
+export const credits = (n: number | null | undefined) => (n == null ? "—" : new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(n));

@@ -58,7 +58,7 @@ export function AdminOverview() {
         <aside className="xl:border-l xl:border-white/10 xl:pl-6">
           <div className="flex items-baseline justify-between">
             <h2 className="eyebrow">Top clients</h2>
-            <Link to="/admin/clients" className="text-xs text-leaf hover:underline">All clients</Link>
+            <Link to="/admin/customers" className="text-xs text-leaf hover:underline">All clients</Link>
           </div>
           <div className="mt-4 space-y-3">
             {d.topClients.length ? d.topClients.map((c: any) => (
@@ -71,7 +71,7 @@ export function AdminOverview() {
                 </div>
                 <div className="text-right shrink-0"><div className="num text-[22px] text-ink">{moneyShort(c.charge_cents)}</div><div className="text-xs text-ink-mute">billed</div></div>
               </button>
-            )) : <div className="glass rounded-2xl p-5 text-sm text-ink-mute">No clients yet. <Link to="/admin/clients" className="text-leaf underline">Add the first one</Link>.</div>}
+            )) : <div className="glass rounded-2xl p-5 text-sm text-ink-mute">No clients yet. <Link to="/admin/customers" className="text-leaf underline">Add the first one</Link>.</div>}
           </div>
           <div className={`mt-4 rounded-2xl p-4 text-sm ${dead ? "bg-bad-wash text-bad" : "glass text-ink-soft"}`}>
             <div className="eyebrow mb-1">System</div>
@@ -159,7 +159,7 @@ function RateCell({ org, onSaved }: { org: any; onSaved: () => void }) {
   return <form onSubmit={(e) => { e.preventDefault(); m.mutate(); }} className="flex items-center gap-1 text-ink-mute">$<input className="input h-8 w-20" value={v} onChange={(e) => setV(e.target.value)} onBlur={() => Number(v) * 100 !== org.rate_cents_per_minute && m.mutate()} aria-label="Rate per minute" /></form>;
 }
 
-function NewClient({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function NewClient({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const { refresh } = useSession();
   const [f, setF] = useState({ name: "", industry: "hvac", timezone: "America/New_York", ownerEmail: "", ownerName: "", rateCentsPerMinute: 25 });
@@ -196,7 +196,7 @@ function NewClient({ open, onClose }: { open: boolean; onClose: () => void }) {
   );
 }
 
-function VoiceKey({ org, onClose }: { org: any; onClose: () => void }) {
+export function VoiceKey({ org, onClose }: { org: any; onClose: () => void }) {
   const [apiKey, setKey] = useState("");
   const [secret, setSecret] = useState("");
   const m = useMutation({ mutationFn: () => put(`/admin/orgs/${org.id}/voice-key`, { apiKey, webhookSecret: secret || undefined }) });

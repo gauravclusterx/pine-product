@@ -12,8 +12,13 @@ import { hashPassword } from "../auth/auth.js";
 import { createOrg, updateOrg } from "../modules/orgs.js";
 import { upsertCustomer } from "../modules/customers.js";
 import { scoreCall } from "../modules/qa.js";
+import { addCredits, creditsForSeconds } from "../modules/billing.js";
 
-if (config.NODE_ENV === "production") { console.error("seed-demo refuses to run in production"); process.exit(1); }
+const JOBS: Array<[string, number]> = [["AC repair", 38500], ["Furnace repair", 42000], ["Water heater replacement", 185000], ["Tune-up", 12900], ["Duct cleaning", 54000], ["Thermostat install", 26500]];
+
+// --demo-only: just the labelled demo customer (no sign-in user) — safe on a live server.
+const DEMO_ONLY = process.argv.includes("--demo-only");
+if (config.NODE_ENV === "production" && !DEMO_ONLY) { console.error("seed-demo refuses to run in production (use --demo-only)"); process.exit(1); }
 
 const ADMIN = process.env.PLATFORM_ADMIN_EMAIL || "admin@pine.local";
 const PASSWORD = process.env.PLATFORM_ADMIN_PASSWORD || "PineDemo2026";
@@ -35,8 +40,14 @@ const SCRIPTS: Array<{ outcome: string; summary: string; lines: string[]; secs: 
 async function main() {
   await initDb();
   await migrate();
-  let admin = await one("SELECT id FROM users WHERE lower(email) = lower($1)", [ADMIN]);
-  if (!admin) admin = await one("INSERT INTO users (email, name, password_hash, is_platform_admin) VALUES ($1, 'Pine admin', $2, true) RETURNING id", [ADMIN, await hashPassword(PASSWORD)]);
+  let admin: any = null;
+  if (DEMO_ONLY) {
+    // The demo customer's owner is a placeholder account that cannot sign in (no Google account).
+    admin = (await one("SELECT id FROM users WHERE email = 'demo.owner@pine.demo'")) || (await one("INSERT INTO users (email, name, password_hash) VALUES ('demo.owner@pine.demo', 'Demo owner', 'google-only') RETURNING id"));
+  } else {
+    admin = await one("SELECT id FROM users WHERE lower(email) = lower($1)", [ADMIN]);
+    if (!admin) admin = await one("INSERT INTO users (email, name, password_hash, is_platform_admin) VALUES ($1, 'Pine admin', $2, true) RETURNING id", [ADMIN, await hashPassword(PASSWORD)]);
+  }
   if (await one("SELECT 1 AS x FROM orgs WHERE name LIKE 'Demo — %'")) { console.log("demo data already present"); return; }
 
   const org = await createOrg({ name: "Demo — Summit Heating & Air", industry: "hvac", timezone: "America/New_York", rateCentsPerMinute: 25 });
@@ -50,6 +61,7 @@ async function main() {
     agents.push((await one("INSERT INTO agents (org_id, name, playbook, status, config, provider_agent_id, published_at) VALUES ($1, $2, $3, 'live', '{}', $4, now() - interval '9 days') RETURNING id", [org.id, name, playbook, `demo_${playbook}`]))!.id);
   }
   const now = Date.now();
+  let voiceUsed = 0;
   const sources = ["google_lsa", "angi", "meta", "web_form", "thumbtack", "yelp"];
   let n = 0;
   for (let day = 20; day >= 0; day--) {
@@ -75,19 +87,33 @@ async function main() {
         [org.id, `demo_call_${n}`, agents[inbound ? 0 : 1], inbound ? "inbound" : "outbound", c.id, leadId, phone, s.secs ? "customer_hangup" : "no_answer", started, new Date(started.getTime() + s.secs * 1000),
           s.secs, s.secs ? Math.ceil(s.secs / 60) * 25 : 0, JSON.stringify(s.lines), s.summary, JSON.stringify({ outcome: s.outcome }), s.outcome, qa?.score ?? null, JSON.stringify(qa || { skipped: "no conversation" })]
       ))!.id;
+      if (s.secs) {
+        const cr = creditsForSeconds(s.secs);
+        voiceUsed += cr;
+        await q("UPDATE calls SET billed_credits = $2 WHERE id = $1", [call, cr]);
+        await q("INSERT INTO wallet_ledger (org_id, kind, delta, reason, ref, created_at) VALUES ($1, 'voice', $2, 'call', $3, $4)", [org.id, -cr, call, new Date(started.getTime() + s.secs * 1000)]);
+      }
       if (s.outcome === "booked") {
         const start = new Date(started.getTime() + 86_400_000);
         start.setUTCMinutes(0, 0, 0);
-        await q("INSERT INTO bookings (org_id, call_id, customer_id, lead_id, connector, job_type, starts_at, ends_at, value_cents, idempotency_key, created_at) VALUES ($1,$2,$3,$4,'native','AC repair',$5,$6,38500,$7,$8)",
-          [org.id, call, c.id, leadId, start, new Date(start.getTime() + 2 * 3_600_000), `demo-${n}`, started]);
+        const job = JOBS[n % JOBS.length];
+        await q("INSERT INTO bookings (org_id, call_id, customer_id, lead_id, connector, job_type, starts_at, ends_at, value_cents, idempotency_key, created_at) VALUES ($1,$2,$3,$4,'native',$5,$6,$7,$8,$9,$10)",
+          [org.id, call, c.id, leadId, job[0], start, new Date(start.getTime() + 2 * 3_600_000), job[1], `demo-${n}`, started]);
       }
       n++;
     }
   }
+  // Billing: a paid plan, a credit top-up, and what the calls used.
+  const topped = 600, msgs = 250;
+  await addCredits(org.id, topped, msgs, "topup", "demo");
+  await q("UPDATE wallet_ledger SET created_at = now() - interval '21 days' WHERE org_id = $1 AND reason = 'topup'", [org.id]);
+  await q("UPDATE orgs SET wallet_voice = GREATEST(0, wallet_voice - $2), subscription_status = 'active', subscription_expires_at = now() + interval '23 days', subscription_price = 3499, currency = 'INR' WHERE id = $1", [org.id, Math.round(voiceUsed * 100) / 100]);
+  await q("INSERT INTO payments (org_id, kind, provider, amount_minor, currency, status, period_start, period_end, note, created_at) VALUES ($1, 'subscription', 'manual', 349900, 'INR', 'success', now() - interval '7 days', now() + interval '23 days', 'demo', now() - interval '7 days')", [org.id]);
+  await q("INSERT INTO payments (org_id, kind, provider, amount_minor, currency, status, voice_credits, chat_credits, note, created_at) VALUES ($1, 'topup', 'manual', 354000, 'INR', 'success', $2, $3, 'demo', now() - interval '21 days')", [org.id, topped, msgs]);
   await q("INSERT INTO audit_log (org_id, action, detail) VALUES ($1, 'team.alert', $2)", [org.id, JSON.stringify({ kind: "new_booking", text: "✅ New booking: Jordan Price — AC repair, tomorrow 10:00–12:00." })]);
   console.log(`demo client created with ${n} calls`);
 }
 
 main()
-  .then(() => { console.log(`sign in: ${ADMIN} / ${process.env.PLATFORM_ADMIN_PASSWORD ? "(PLATFORM_ADMIN_PASSWORD)" : PASSWORD}`); return closeDb(); })
+  .then(() => { if (!DEMO_ONLY) console.log(`sign in: ${ADMIN} / ${process.env.PLATFORM_ADMIN_PASSWORD ? "(PLATFORM_ADMIN_PASSWORD)" : PASSWORD}`); return closeDb(); })
   .catch(async (e) => { console.error(e); await closeDb(); process.exit(1); });

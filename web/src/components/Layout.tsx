@@ -2,10 +2,11 @@ import { NavLink, Outlet, Navigate, useLocation } from "react-router-dom";
 import { ReactNode, useState } from "react";
 import {
   LayoutDashboard, Bot, PhoneCall, Users, Inbox, CalendarDays, Megaphone, Plug, Settings, Shield, LogOut, Menu, Phone, X,
-  Building2, Activity, ArrowLeftRight, type LucideIcon,
+  Building2, Activity, ArrowLeftRight, Wallet, Receipt, SlidersHorizontal, type LucideIcon,
 } from "lucide-react";
 import { useSession } from "../lib/session";
 import { Loading } from "./ui";
+import { SubscribeGate } from "../pages/Billing";
 
 type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
@@ -19,12 +20,15 @@ const APP_NAV: NavItem[] = [
   { to: "/app/campaigns", label: "Campaigns", icon: Megaphone },
   { to: "/app/numbers", label: "Phone numbers", icon: Phone },
   { to: "/app/integrations", label: "Integrations", icon: Plug },
+  { to: "/app/billing", label: "Billing", icon: Wallet },
   { to: "/app/settings", label: "Settings", icon: Settings },
 ];
 
 const ADMIN_NAV: NavItem[] = [
   { to: "/admin", label: "Overview", icon: LayoutDashboard, end: true },
-  { to: "/admin/clients", label: "Clients", icon: Building2 },
+  { to: "/admin/customers", label: "Customers", icon: Building2 },
+  { to: "/admin/payments", label: "Payments", icon: Receipt },
+  { to: "/admin/settings", label: "Settings", icon: SlidersHorizontal },
   { to: "/admin/system", label: "System", icon: Activity },
 ];
 
@@ -111,30 +115,35 @@ export function AppLayout() {
   if (loading) return <Loading />;
   if (!me) return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname)}`} replace />;
   const current = me.orgs.find((o) => o.id === me.orgId);
-  const orgPicker = me.orgs.length > 1 || me.user.isPlatformAdmin ? (
+  // Customers never pick a workspace; admins reach one from the admin panel.
+  const orgPicker = me.orgs.length > 1 && !me.user.isPlatformAdmin ? (
     <div>
       <div className="eyebrow mb-2">Workspace</div>
       <select className="input h-10 text-sm" value={me.orgId} onChange={(e) => switchOrg(e.target.value)} aria-label="Workspace">
-        {!me.orgId && <option value="">Choose a client…</option>}
         {me.orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
       </select>
     </div>
   ) : null;
+  const viewing = me.user.isPlatformAdmin && current ? (
+    <div className="rounded-2xl card-roi px-4 py-3 text-xs text-ink-soft"><div className="eyebrow text-leaf/80">Viewing as admin</div><div className="mt-1 text-ink font-medium truncate">{current.name}</div></div>
+  ) : orgPicker;
   const adminLink = me.user.isPlatformAdmin && (
     <NavLink to="/admin" className="mt-5 flex items-center gap-3 rounded-xl px-3 h-10 text-sm text-leaf bg-leaf-wash shadow-glow hover:brightness-110">
       <Shield className="h-4 w-4" /> Admin panel
     </NavLink>
   );
   return (
-    <Shell nav={APP_NAV} top={orgPicker} footer={adminLink} title={current?.name ? `Pine AI · ${current.name}` : "Pine AI"}>
+    <Shell nav={APP_NAV} top={viewing} footer={adminLink} title={current?.name ? `Pine AI · ${current.name}` : "Pine AI"}>
       {!me.orgId ? (
         <div className="py-16 text-center">
-          <div className="font-display text-2xl text-ink">No workspace yet</div>
+          <div className="font-display text-2xl text-ink">{me.user.isPlatformAdmin ? "Pick a customer" : "No workspace yet"}</div>
           <p className="text-sm text-ink-mute mt-2">
-            {me.user.isPlatformAdmin ? <>Choose a client above, or create one in the <NavLink className="text-leaf underline" to="/admin/clients">Admin panel</NavLink>.</> : "Your account is not part of a workspace yet. Ask your Pine AI contact to add you."}
+            {me.user.isPlatformAdmin ? <>Open a customer from the <NavLink className="text-leaf underline" to="/admin/customers">Admin panel</NavLink> to see their workspace.</> : "Your account is not part of a workspace yet. Ask your Pine AI contact to add you."}
           </p>
         </div>
-      ) : <Outlet />}
+      ) : me.billing?.suspended && !me.user.isPlatformAdmin ? (
+        <div className="py-16 text-center"><div className="font-display text-2xl">Workspace suspended</div><p className="text-sm text-ink-mute mt-2">Please contact Pine AI.</p></div>
+      ) : me.billing?.required && !me.user.isPlatformAdmin && !loc.pathname.startsWith("/app/billing") ? <SubscribeGate /> : <Outlet />}
     </Shell>
   );
 }

@@ -7,6 +7,24 @@ export interface Me {
   orgId: string;
   role: "owner" | "manager" | "viewer";
   orgs: Array<{ id: string; name: string; slug: string; role: string }>;
+  billing: Billing | null;
+}
+
+export interface Billing {
+  status: "inactive" | "trial" | "active" | "expired";
+  active: boolean;
+  suspended: boolean;
+  expiresAt: string | null;
+  trialEndsAt: string | null;
+  trialUsed: boolean;
+  price: number;
+  currency: "INR" | "USD" | "GBP";
+  voicePerUnit: number;
+  chatPerUnit: number;
+  taxPercent: number;
+  wallet: { voice: number; chat: number };
+  paywallEnabled: boolean;
+  required: boolean;
 }
 
 interface SessionValue {

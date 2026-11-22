@@ -19,6 +19,8 @@ import { placeCall } from "../modules/outbound.js";
 import { getCustomer, updateCustomer } from "../modules/customers.js";
 import { acceptLead, leadInputSchema, listLeads } from "../intake/leads.js";
 import * as campaigns from "../modules/campaigns.js";
+import { orgBilling, requireCurrentSubscription } from "../modules/billing.js";
+import { billingRouter, createCustomerWorkspace } from "./billing.js";
 import { dashboard, platformOverview, platformUsage, usage } from "../modules/stats.js";
 import { translateCall, translationAvailable } from "../modules/translate.js";
 import { CHANNELS, CRM_CONNECTORS, connectorContext, deleteIntegration, listIntegrations, markIntegration, rotateInboundKey, saveIntegration, saveIntegrationSchema } from "../hub/registry.js";
@@ -27,7 +29,7 @@ import * as rasen from "../voice/rasen/service.js";
 import { isProd, isTest, publicBaseUrl } from "../config.js";
 import crypto from "node:crypto";
 import { log } from "../lib/logger.js";
-import { STATE_COOKIE, allowedDomains, authUrl, decideSignIn, fetchGoogleProfile, googleConfigured, newState, requestOrigin } from "../auth/google.js";
+import { adminEmails, STATE_COOKIE, allowedDomains, authUrl, decideSignIn, fetchGoogleProfile, googleConfigured, newState, requestOrigin } from "../auth/google.js";
 
 export const apiRouter = Router();
 const org = (req: Request) => getOrg(req.auth!.orgId);
@@ -63,15 +65,18 @@ apiRouter.get("/auth/google/callback", async (req, res) => {
     const d = decideSignIn(g, user ? { disabled: !!user.disabled } : null);
     if (!d.ok) return fail(d.reason);
     if (!user) {
-      // Staff on an allowed domain: first sign-in creates the account. It has no usable password.
-      user = await one("INSERT INTO users (email, name, password_hash, is_platform_admin) VALUES ($1, $2, $3, true) RETURNING *", [g.email, g.name, "google-only"]);
-      await audit(null, user!.id, "user.created_by_google", { email: g.email });
-    } else if (d.staff && !user.is_platform_admin) {
-      await q("UPDATE users SET is_platform_admin = true WHERE id = $1", [user.id]);
+      // First sign-in creates the account (no usable password). A customer also gets a workspace.
+      user = await one("INSERT INTO users (email, name, password_hash, is_platform_admin) VALUES ($1, $2, $3, $4) RETURNING *", [g.email, g.name, "google-only", d.admin]);
+      if (!d.admin) await createCustomerWorkspace(user!.id, g.name, g.email);
+      await audit(null, user!.id, "user.created_by_google", { email: g.email, admin: d.admin });
+    } else if (adminEmails().length && !!user.is_platform_admin !== d.admin) {
+      // The admin list is the source of truth for who is staff.
+      await q("UPDATE users SET is_platform_admin = $2 WHERE id = $1", [user.id, d.admin]);
+      if (!d.admin && !(await one("SELECT 1 AS x FROM memberships WHERE user_id = $1", [user.id]))) await createCustomerWorkspace(user.id, g.name, g.email);
     }
     await q("UPDATE users SET last_login_at = now(), name = CASE WHEN name = '' THEN $2 ELSE name END WHERE id = $1", [user!.id, g.name]);
     setSessionCookie(res, signSession(user!.id, user!.token_version));
-    res.redirect(d.staff ? "/admin" : "/app");
+    res.redirect(d.admin ? "/admin" : "/app");
   } catch (err) {
     log.warn({ err: (err as Error).message }, "google sign-in failed");
     fail("google_failed");
@@ -101,13 +106,17 @@ apiRouter.post("/auth/login", h(async (req, res) => {
 apiRouter.post("/auth/logout", (req, res) => { clearSessionCookie(res); res.json({ ok: true }); });
 
 apiRouter.use(requireAuth);
+// Suspended or unpaid (paywall on) clients reach only sign-in, billing and their workspace profile.
+apiRouter.use(requireCurrentSubscription(["/auth/", "/billing", "/org"]));
+apiRouter.use(billingRouter);
 
 apiRouter.get("/auth/me", h(async (req, res) => {
   const a = req.auth!;
   const orgs = a.isPlatformAdmin
     ? await q("SELECT id, name, slug, 'owner' AS role FROM orgs ORDER BY name")
     : await q("SELECT o.id, o.name, o.slug, m.role FROM memberships m JOIN orgs o ON o.id = m.org_id WHERE m.user_id = $1 ORDER BY o.name", [a.userId]);
-  res.json({ user: { id: a.userId, email: a.email, name: a.name, isPlatformAdmin: a.isPlatformAdmin }, orgId: a.orgId, role: a.role, orgs });
+  const billing = a.orgId ? await orgBilling(a.orgId) : null;
+  res.json({ user: { id: a.userId, email: a.email, name: a.name, isPlatformAdmin: a.isPlatformAdmin }, orgId: a.orgId, role: a.role, orgs, billing });
 }));
 
 apiRouter.post("/auth/password", h(async (req, res) => {

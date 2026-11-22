@@ -28,8 +28,10 @@ const schema = z.object({
   /** Google sign-in (the only sign-in method outside tests). */
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
-  /** Staff domains: any verified Google email on these signs in as platform staff. */
+  /** Domains whose Google accounts may sign up on their own (each gets its own workspace). */
   GOOGLE_ALLOWED_DOMAINS: z.string().default("clusterx.ai,rasen.ai"),
+  /** Platform admins (comma separated emails): they get the admin panel. Everyone else is a customer. */
+  PLATFORM_ADMIN_EMAILS: z.string().default(""),
   /** Extra public origins the app is served from (comma separated), e.g. a preview domain. */
   APP_ORIGINS: z.string().default(""),
   /** Where the landing page lead form is stored and emailed (the landing site worker). */

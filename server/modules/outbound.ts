@@ -5,6 +5,7 @@
  * job; a rule that says "never" ends it.
  */
 import { one, q } from "../db/pool.js";
+import { automationAllowed, hasCredit } from "./billing.js";
 import { DeferJob, PermanentJobError, takeRateSlot } from "../queue/queue.js";
 import { nextCallableTime } from "../lib/time.js";
 import * as rasen from "../voice/rasen/service.js";
@@ -38,6 +39,9 @@ export async function isOnDnc(orgId: string, phone: string): Promise<boolean> {
 export async function placeCall(org: Org, input: PlaceCallInput): Promise<{ providerCallId: string }> {
   const now = input.now ?? new Date();
   if (org.status !== "active") throw new PermanentJobError("workspace is not active");
+  // Prepaid voice credits (CRM model): no balance, no outbound call. Checked again when the job runs.
+  if (!(await hasCredit(org.id, "voice", 0.01))) throw new PermanentJobError("no voice credits left — top up in Billing");
+  if (!(await automationAllowed(org.id))) throw new PermanentJobError("the subscription is not active");
   if (await isOnDnc(org.id, input.phone)) throw new PermanentJobError("number is on the do-not-call list");
   const customer = await findCustomerByPhone(org.id, input.phone);
   if (!input.manual && org.settings.speedToLead.requireConsent && !customer?.consentAt) {

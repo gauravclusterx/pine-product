@@ -38,7 +38,7 @@ export const uniq = (prefix = "x") => `${prefix}${Date.now().toString(36)}${(seq
 export async function makeOrg(over: Partial<{ name: string; slug: string; timezone: string; industry: string; settings: Record<string, unknown>; rate: number }> = {}) {
   const slug = over.slug || uniq("org");
   const rows = await q(
-    "INSERT INTO orgs (name, slug, timezone, industry, settings, rate_cents_per_minute) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+    "INSERT INTO orgs (name, slug, timezone, industry, settings, rate_cents_per_minute, wallet_voice, wallet_chat) VALUES ($1, $2, $3, $4, $5, $6, 1000, 1000) RETURNING *",
     [over.name || "Acme Heating & Air", slug, over.timezone || "America/New_York", over.industry || "hvac", JSON.stringify(over.settings || {}), over.rate ?? 25]
   );
   return rows[0];

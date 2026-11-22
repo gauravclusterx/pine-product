@@ -6,6 +6,7 @@
 import { q } from "../db/pool.js";
 import { log } from "../lib/logger.js";
 import { getIntegration } from "./registry.js";
+import { addCredits, charge } from "../modules/billing.js";
 import { fetchHttp } from "./http.js";
 import type { HttpFn } from "./types.js";
 
@@ -19,6 +20,8 @@ export async function sendSms(orgId: string, to: string, body: string, http: Htt
   if (await isDnc(orgId, to)) return { sent: false, channel: "sms", detail: "the number has opted out" };
   const tw = await getIntegration(orgId, "twilio");
   if (!tw || tw.status === "disabled") return { sent: false, channel: "sms", detail: "SMS is not connected" };
+  // Prepaid message credits (CRM model): 1 per message, taken before sending, refunded if it fails.
+  if (!(await charge(orgId, "chat", 1, "sms"))) return { sent: false, channel: "sms", detail: "no message credits left — top up in Billing" };
   const { accountSid, authToken } = tw.credentials;
   const params = new URLSearchParams({ To: to, Body: body.slice(0, 1500), MessagingServiceSid: String(tw.settings.messagingServiceSid || "") });
   const res = await http({
@@ -33,6 +36,7 @@ export async function sendSms(orgId: string, to: string, body: string, http: Htt
     await q("INSERT INTO dnc_list (org_id, phone_e164, reason, source) VALUES ($1, $2, 'opt_out', 'sms_stop') ON CONFLICT DO NOTHING", [orgId, to]);
   }
   await q("INSERT INTO audit_log (org_id, action, detail) VALUES ($1, 'sms.send', $2)", [orgId, JSON.stringify({ to: to.slice(-4), ok, status: res.status })]);
+  if (!ok) await addCredits(orgId, 0, 1, "sms.refund");
   if (!ok) log.warn({ orgId, status: res.status, code: res.data?.code }, "sms failed");
   return { sent: ok, channel: "sms", detail: ok ? "sent" : `Twilio ${res.status}: ${res.data?.message || "error"}` };
 }

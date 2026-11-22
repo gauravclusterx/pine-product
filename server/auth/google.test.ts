@@ -2,28 +2,34 @@ import { describe, expect, it } from "vitest";
 import { decideSignIn, emailDomain } from "./google.js";
 
 const DOMAINS = ["clusterx.ai", "rasen.ai"];
+const ADMINS = ["gaurav@clusterx.ai", "kailash@clusterx.ai"];
 const g = (email: string, emailVerified = true) => ({ email, emailVerified });
+const decide = (email: string, existing: { disabled: boolean } | null = null, verified = true) => decideSignIn(g(email, verified), existing, DOMAINS, ADMINS);
 
 describe("Google sign-in policy", () => {
-  it("lets staff on an allowed domain in and creates their account", () => {
-    expect(decideSignIn(g("asha@clusterx.ai"), null, DOMAINS)).toEqual({ ok: true, create: true, staff: true });
-    expect(decideSignIn(g("Ravi@Rasen.ai"), null, DOMAINS)).toEqual({ ok: true, create: true, staff: true });
+  it("makes only the listed emails admins", () => {
+    expect(decide("gaurav@clusterx.ai")).toEqual({ ok: true, create: true, admin: true });
+    expect(decide("Kailash@ClusterX.ai")).toEqual({ ok: true, create: true, admin: true });
   });
 
-  it("refuses an unknown person from any other domain", () => {
-    expect(decideSignIn(g("someone@gmail.com"), null, DOMAINS)).toEqual({ ok: false, reason: "not_allowed" });
-    // A look-alike domain is not the staff domain.
-    expect(decideSignIn(g("x@evilclusterx.ai"), null, DOMAINS)).toEqual({ ok: false, reason: "not_allowed" });
-    expect(decideSignIn(g("x@clusterx.ai.evil.com"), null, DOMAINS)).toEqual({ ok: false, reason: "not_allowed" });
+  it("signs other people on the allowed domains up as customers", () => {
+    expect(decide("tejaswi@clusterx.ai")).toEqual({ ok: true, create: true, admin: false });
+    expect(decide("ravi@rasen.ai")).toEqual({ ok: true, create: true, admin: false });
   });
 
-  it("lets a person staff already added sign in whatever their domain, but not as staff", () => {
-    expect(decideSignIn(g("owner@harborplumbing.com"), { disabled: false }, DOMAINS)).toEqual({ ok: true, create: false, staff: false });
+  it("refuses an unknown person from any other domain, including look-alikes", () => {
+    expect(decide("someone@gmail.com")).toEqual({ ok: false, reason: "not_allowed" });
+    expect(decide("x@evilclusterx.ai")).toEqual({ ok: false, reason: "not_allowed" });
+    expect(decide("x@clusterx.ai.evil.com")).toEqual({ ok: false, reason: "not_allowed" });
+  });
+
+  it("lets a person an admin already added sign in whatever their domain", () => {
+    expect(decide("owner@harborplumbing.com", { disabled: false })).toEqual({ ok: true, create: false, admin: false });
   });
 
   it("refuses unverified emails and disabled users", () => {
-    expect(decideSignIn(g("asha@clusterx.ai", false), null, DOMAINS)).toEqual({ ok: false, reason: "not_verified" });
-    expect(decideSignIn(g("asha@clusterx.ai"), { disabled: true }, DOMAINS)).toEqual({ ok: false, reason: "disabled" });
+    expect(decide("tejaswi@clusterx.ai", null, false)).toEqual({ ok: false, reason: "not_verified" });
+    expect(decide("tejaswi@clusterx.ai", { disabled: true })).toEqual({ ok: false, reason: "disabled" });
   });
 
   it("reads the domain of an email", () => {

@@ -22,9 +22,10 @@ export function buildApp() {
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
-        "default-src": ["'self'"], "img-src": ["'self'", "data:"], "media-src": ["'self'", "blob:"],
+        "default-src": ["'self'"], "img-src": ["'self'", "data:", "https:"], "media-src": ["'self'", "blob:"],
+        "script-src": ["'self'", "https://checkout.razorpay.com"], "frame-src": ["https://api.razorpay.com", "https://checkout.razorpay.com"],
         "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], "font-src": ["'self'", "https://fonts.gstatic.com"],
-        "connect-src": ["'self'"], "frame-ancestors": ["'none'"],
+        "connect-src": ["'self'", "https://api.razorpay.com", "https://lumberjack.razorpay.com"], "frame-ancestors": ["'none'"],
       },
     },
   }));

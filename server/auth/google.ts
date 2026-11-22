@@ -1,12 +1,8 @@
 /**
  * "Sign in with Google" — the only way to sign in (password sign-in is test-only).
  *
- * Who may sign in:
- *  - Anyone whose Google email is on an allowed staff domain (GOOGLE_ALLOWED_DOMAINS, default
- *    clusterx.ai + rasen.ai). Staff are platform admins; their account is created on first sign-in.
- *  - A person platform staff already added (a client owner or a team member) — their user row
- *    exists, so they may sign in with that Google email whatever its domain.
- *  - Nobody else.
+ * Who may sign in: see decideSignIn. Admins = PLATFORM_ADMIN_EMAILS; customers sign up from the
+ * allowed domains (or were added by an admin) and each customer gets their own workspace.
  *
  * The flow is the plain OAuth 2.0 authorization-code flow: a random `state` in a short-lived
  * httpOnly cookie guards the callback, the code is exchanged server-side, and only a verified
@@ -29,20 +25,33 @@ export function allowedDomains(): string[] {
 
 export const emailDomain = (email: string) => email.trim().toLowerCase().split("@").pop() || "";
 
+export function adminEmails(): string[] {
+  return config.PLATFORM_ADMIN_EMAILS.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+}
+
 export type SignInDecision =
-  | { ok: true; create: boolean; staff: boolean }
+  | { ok: true; create: boolean; admin: boolean }
   | { ok: false; reason: "not_verified" | "not_allowed" | "disabled" };
 
-/** Pure policy: may this Google identity sign in, and as what. */
+/**
+ * Pure policy: may this Google identity sign in, and as what.
+ *  - Platform admins are the listed emails only.
+ *  - Anyone already added (a client owner or team member) signs in, whatever the domain.
+ *  - A new person on an allowed domain signs up as a customer with their own workspace.
+ *  - Nobody else.
+ */
 export function decideSignIn(
   g: { email: string; emailVerified: boolean },
   existing: { disabled: boolean } | null,
   domains: string[] = allowedDomains(),
+  admins: string[] = adminEmails(),
 ): SignInDecision {
   if (!g.email || !g.emailVerified) return { ok: false, reason: "not_verified" };
-  const staff = domains.includes(emailDomain(g.email));
-  if (existing) return existing.disabled ? { ok: false, reason: "disabled" } : { ok: true, create: false, staff };
-  return staff ? { ok: true, create: true, staff } : { ok: false, reason: "not_allowed" };
+  const email = g.email.trim().toLowerCase();
+  const admin = admins.includes(email);
+  if (existing) return existing.disabled ? { ok: false, reason: "disabled" } : { ok: true, create: false, admin };
+  if (admin || domains.includes(emailDomain(email))) return { ok: true, create: true, admin };
+  return { ok: false, reason: "not_allowed" };
 }
 
 /**
