@@ -28,22 +28,30 @@ const body = z.object({
   skipTest: z.boolean().optional(),
 });
 
-/** Check new keys with their provider (with the model chosen), then save. */
-async function checkAndPatch(b: z.infer<typeof body>, current: { openai: { model: string }; anthropic: { model: string } }): Promise<KeyPatch> {
+/**
+ * Check new keys with their provider (with the model chosen), then save. A wrong key (401/403,
+ * unknown model) is refused. A busy provider (429 rate limit, 5xx) means the key itself was
+ * accepted, so it is saved with a warning instead of being lost.
+ */
+async function checkAndPatch(b: z.infer<typeof body>, current: { openai: { model: string }; anthropic: { model: string } }): Promise<{ patch: KeyPatch; warnings: string[] }> {
   const p: KeyPatch = {};
+  const warnings: string[] = [];
   if (b.openaiModel !== undefined) p.openaiModel = b.openaiModel;
   if (b.anthropicModel !== undefined) p.anthropicModel = b.anthropicModel;
   if (b.openaiKey !== undefined) p.openaiKey = b.openaiKey || null;
   if (b.anthropicKey !== undefined) p.anthropicKey = b.anthropicKey || null;
-  if (!b.skipTest) {
-    try {
-      if (p.openaiKey) await testKey("openai", p.openaiKey, p.openaiModel || current.openai.model);
-    } catch (e) { throw badRequest(`OpenAI did not accept this key/model: ${(e as Error).message}`); }
-    try {
-      if (p.anthropicKey) await testKey("anthropic", p.anthropicKey, p.anthropicModel || current.anthropic.model);
-    } catch (e) { throw badRequest(`Anthropic did not accept this key/model: ${(e as Error).message}`); }
-  }
-  return p;
+  const check = async (name: string, provider: "openai" | "anthropic", key: string | null | undefined, model: string) => {
+    if (!key || b.skipTest) return;
+    try { await testKey(provider, key, model); }
+    catch (e) {
+      const msg = (e as Error).message || "";
+      if (/(429|500|502|503|529)|rate.?limit|overloaded/i.test(msg)) warnings.push(`${name} is busy right now (${msg.slice(0, 80)}). The key was saved; it will be used when ${name} answers again.`);
+      else throw badRequest(`${name} did not accept this key/model: ${msg.slice(0, 300)}`);
+    }
+  };
+  await check("OpenAI", "openai", p.openaiKey, p.openaiModel || current.openai.model);
+  await check("Anthropic", "anthropic", p.anthropicKey, p.anthropicModel || current.anthropic.model);
+  return { patch: p, warnings };
 }
 
 aiRouter.get("/admin/ai-keys", requirePlatformAdmin, h(async (_req, res) => {
@@ -52,9 +60,10 @@ aiRouter.get("/admin/ai-keys", requirePlatformAdmin, h(async (_req, res) => {
 
 aiRouter.put("/admin/ai-keys", requirePlatformAdmin, h(async (req, res) => {
   const b = parse(body, req.body);
-  await setPlatformKeys(await checkAndPatch(b, await platformKeyStatus()));
+  const { patch, warnings } = await checkAndPatch(b, await platformKeyStatus());
+  await setPlatformKeys(patch);
   await audit(null, req.auth!.userId, "admin.ai_keys_changed", { scope: "platform", openaiKey: b.openaiKey !== undefined, anthropicKey: b.anthropicKey !== undefined, openaiModel: b.openaiModel, anthropicModel: b.anthropicModel });
-  res.json({ ...(await platformKeyStatus()), models: { openai: OPENAI_MODELS, anthropic: ANTHROPIC_MODELS } });
+  res.json({ ...(await platformKeyStatus()), warnings, models: { openai: OPENAI_MODELS, anthropic: ANTHROPIC_MODELS } });
 }));
 
 aiRouter.get("/admin/customers/:id/ai-keys", requirePlatformAdmin, h(async (req, res) => {
@@ -64,9 +73,10 @@ aiRouter.get("/admin/customers/:id/ai-keys", requirePlatformAdmin, h(async (req,
 aiRouter.put("/admin/customers/:id/ai-keys", requirePlatformAdmin, h(async (req, res) => {
   const id = parse(uuid, P(req).id);
   const b = parse(body, req.body);
-  await setOrgKeys(id, await checkAndPatch(b, await orgKeyStatus(id)));
+  const { patch, warnings } = await checkAndPatch(b, await orgKeyStatus(id));
+  await setOrgKeys(id, patch);
   await audit(id, req.auth!.userId, "admin.ai_keys_changed", { scope: "customer", openaiKey: b.openaiKey !== undefined, anthropicKey: b.anthropicKey !== undefined, openaiModel: b.openaiModel, anthropicModel: b.anthropicModel });
-  res.json({ ...(await orgKeyStatus(id)), models: { openai: OPENAI_MODELS, anthropic: ANTHROPIC_MODELS } });
+  res.json({ ...(await orgKeyStatus(id)), warnings, models: { openai: OPENAI_MODELS, anthropic: ANTHROPIC_MODELS } });
 }));
 
 aiRouter.get("/ai/status", requireRole("viewer"), h(async (req, res) => {

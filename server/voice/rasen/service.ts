@@ -213,7 +213,7 @@ const APPENDIX_MARK = "CUSTOMER CONTEXT (auto-injected by the platform";
  * dotted variable other than contact.* becomes {{greeting_name}} (declared, defaults to "there").
  */
 export function safeFirstMessage(text: string): string {
-  return flattenMergeFields(text).replace(/{{s*(?!contact_)[A-Za-z0-9_]+.[^}]*}}/g, "{{greeting_name}}").slice(0, 2000);
+  return flattenMergeFields(text).replace(/\{\{\s*(?!contact_)[A-Za-z0-9_]+\.[^}]*\}\}/g, "{{greeting_name}}").slice(0, 2000);
 }
 
 export function flattenMergeFields(text: string): string {

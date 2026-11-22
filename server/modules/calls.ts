@@ -14,6 +14,8 @@ import { getOrg } from "./orgs.js";
 import { setStatusFromCall, upsertCustomer } from "./customers.js";
 import { scoreCall } from "./qa.js";
 import { chargeUpTo, creditsForSeconds } from "./billing.js";
+import { hintFor } from "./callHints.js";
+import { analyseCall } from "./callAnalysis.js";
 
 const NO_CONTACT = new Set(["busy", "no_answer", "rejected", "invalid_number", "carrier_failed", "never_connected", "voicemail"]);
 
@@ -65,6 +67,9 @@ export async function ingestCall(m: MappedExecution, opts: { expectOrgId?: strin
       await q("UPDATE inbound_lookups SET provider_call_id = $2 WHERE id = $1 AND provider_call_id IS NULL", [hit.id, m.id]);
     }
   }
+  // Outbound calls placed by a campaign (or before our own row was written): the hint knows the number.
+  const hint = phone ? null : await hintFor(org.id, m.id);
+  if (hint) phone = hint.phone;
   const customer = phone ? await upsertCustomer(org.id, { phone }) : null;
   const outcome = outcomeOf(m);
   const ended = m.status === "ended";
@@ -79,7 +84,7 @@ export async function ingestCall(m: MappedExecution, opts: { expectOrgId?: strin
       return { id: prev.id, created: false, charged: null as number | null, prevEnded: prev.status === "ended" };
     }
     const values = [
-      org.id, m.id, agent.id, direction, customer?.id || null, uuidOrNull(md.lead_id), uuidOrNull(md.campaign_id), phone || "",
+      org.id, m.id, agent.id, direction, hint?.customerId || customer?.id || null, uuidOrNull(md.lead_id) || hint?.leadId || null, uuidOrNull(md.campaign_id) || hint?.campaignId || null, phone || "",
       m.status, m.ended_reason, m.created_at || new Date().toISOString(), m.ended_at, m.conversation_time,
       JSON.stringify(m.transcript ? m.transcript.split("\n") : []), m.summary || "", JSON.stringify(extraction),
       !!m.telephony_data.recording_url, outcome || null, providerUpdated, m.results_final,
@@ -159,6 +164,8 @@ async function afterCallEnded(orgId: string, callId: string): Promise<void> {
 
 /** Once every result has settled: score the call and raise second-chance work. Idempotent. */
 export async function finaliseCall(callId: string): Promise<void> {
+  // No usable outcome from the agent (e.g. an agent synced from Rasen): classify the transcript with AI, like the CRM.
+  await analyseCall(callId);
   const c = await one("SELECT c.*, o.name AS org_name FROM calls c JOIN orgs o ON o.id = c.org_id WHERE c.id = $1", [callId]);
   if (!c) return;
   const transcript = Array.isArray(c.transcript) ? c.transcript.join("\n") : "";

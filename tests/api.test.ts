@@ -476,3 +476,71 @@ describe("one dialling gate everywhere (credits + subscription)", () => {
     spy.mockRestore();
   });
 });
+
+describe("who is on a call (call hints, like the CRM)", () => {
+  it("a campaign call without a number is linked to its contact from the recipient list, and the status follows", async () => {
+    const svc: any = await import("../server/voice/rasen/service.js");
+    const { owner, orgId } = await setupOrg("Hint Cooling", "ra_ok_h_0123456789");
+    const agent = await liveAgent(owner, orgId, "speed_to_lead");
+    const cust = await owner.agent.post("/api/customers").set(owner.csrf).send({ name: "Palak", phone: "+918707760367", stage: "lead" });
+    const camp = await owner.agent.post("/api/campaigns").set(owner.csrf).send({ name: "Hint campaign", kind: "contacts", stage: "lead", agentId: agent.id, consentConfirmed: true });
+    expect(camp.body.error?.message || "").toBe("");
+    expect(camp.status).toBe(201);
+    expect(campaignCsvs[campaignCsvs.length - 1].split("\n")[0]).toContain("customer_phone");
+    // The provider's call record carries no number (metadata is empty for campaign calls).
+    const evt = analyzed("call_camp_1", agent.providerAgentId);
+    evt.data.call.metadata = {};
+    expect((await webhook(evt)).status).toBe(200);
+    expect((await one("SELECT phone_e164, customer_id FROM calls WHERE provider_call_id = 'call_camp_1'"))).toMatchObject({ phone_e164: "", customer_id: null });
+    const spy = vi.spyOn(svc, "listCampaignRecipients").mockResolvedValue([{ to_e164: "+918707760367", attempts: [{ call_session_id: "call_camp_1" }] }]);
+    vi.spyOn(svc, "getCampaign").mockResolvedValue({ status: "running", progress: {} });
+    const { syncCampaign } = await import("../server/modules/campaigns.js");
+    const { getOrg } = await import("../server/modules/orgs.js");
+    await syncCampaign(await getOrg(orgId), camp.body.campaign.id);
+    const call = await one("SELECT phone_e164, customer_id, campaign_id FROM calls WHERE provider_call_id = 'call_camp_1'");
+    expect(call).toMatchObject({ phone_e164: "+918707760367", customer_id: cust.body.customer.id, campaign_id: camp.body.campaign.id });
+    expect((await one("SELECT status FROM customers WHERE id = $1", [cust.body.customer.id]))!.status).toBe("booked");
+    const conv = await owner.agent.get(`/api/customers/${cust.body.customer.id}/conversation`);
+    expect(conv.body.calls).toBe(1);
+    spy.mockRestore();
+  });
+
+  it("a call we dial is remembered, so a webhook that arrives first never loses the number", async () => {
+    const { owner, orgId } = await setupOrg("Race Plumbing", "ra_ok_r_0123456789");
+    const agent = await liveAgent(owner, orgId, "speed_to_lead");
+    const r = await owner.agent.post("/api/calls").set(owner.csrf).send({ agentId: agent.id, phone: "+12125550171" });
+    expect(r.status).toBe(202);
+    expect(calls[calls.length - 1].variableValues.customer_phone).toBe("+12125550171");
+    const id = r.body.providerCallId;
+    expect((await one("SELECT phone_e164 FROM call_hints WHERE provider_call_id = $1", [id]))!.phone_e164).toBe("+12125550171");
+    await q("DELETE FROM calls WHERE provider_call_id = $1", [id]);
+    const evt = analyzed(id, agent.providerAgentId);
+    evt.data.call.metadata = {};
+    await webhook(evt);
+    expect((await one("SELECT phone_e164 FROM calls WHERE provider_call_id = $1", [id]))!.phone_e164).toBe("+12125550171");
+  });
+});
+
+describe("AI call analysis (like the CRM's analyzeTranscript)", () => {
+  it("reads the model's JSON and rejects anything outside the outcome list", async () => {
+    const { parseAnalysis } = await import("../server/modules/callAnalysis.js");
+    expect(parseAnalysis('Here: {"outcome":"booked","customer_name":"Palak","next_step":"Visit 24 Nov 5:30 PM","sentiment":"positive","summary":"Booked."}')).toMatchObject({ outcome: "booked", customer_name: "Palak" });
+    expect(parseAnalysis('{"outcome":"amazing"}')).toBeNull();
+    expect(parseAnalysis("no json")).toBeNull();
+  });
+
+  it("classifies a call with no outcome and updates the contact", async () => {
+    const { analyseCall } = await import("../server/modules/callAnalysis.js");
+    const { owner, orgId } = await setupOrg("Analyse Air", "ra_ok_z_0123456789");
+    await admin.agent.put(`/api/admin/customers/${orgId}/ai-keys`).set(admin.csrf).send({ openaiKey: "sk-abcdefghijklmnopqrstuvwx5555", skipTest: true });
+    const c = await owner.agent.post("/api/customers").set(owner.csrf).send({ phone: "+12125550172", stage: "lead" });
+    const call = await one(
+      "INSERT INTO calls (org_id, provider_call_id, direction, customer_id, phone_e164, status, started_at, transcript, outcome) VALUES ($1, 'call_an_1', 'outbound', $2, '+12125550172', 'ended', now(), $3, 'unknown') RETURNING id",
+      [orgId, c.body.customer.id, JSON.stringify(["AI: Hello", "Customer: This is Palak, please come tomorrow at 5", "AI: Booked for tomorrow 5 PM."])]
+    );
+    const ok = await analyseCall(call!.id, async () => '{"outcome":"booked","customer_name":"Palak","next_step":"Visit tomorrow 5 PM","sentiment":"positive","summary":"Palak booked a visit."}');
+    expect(ok).toBe(true);
+    expect(await one("SELECT outcome, summary FROM calls WHERE id = $1", [call!.id])).toMatchObject({ outcome: "booked", summary: "Palak booked a visit." });
+    expect(await one("SELECT name, status FROM customers WHERE id = $1", [c.body.customer.id])).toMatchObject({ name: "Palak", status: "booked" });
+  });
+});

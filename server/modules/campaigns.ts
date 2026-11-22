@@ -17,6 +17,8 @@ import { getAgent } from "./agents.js";
 import { buildCustomerMemory, toCustomer, upsertCustomer } from "./customers.js";
 import type { Org } from "./orgs.js";
 import { requireVoiceWorkspace } from "./voiceWorkspace.js";
+import { harvestCampaignHints } from "./callHints.js";
+import { log } from "../lib/logger.js";
 import { assertCanDial } from "./billing.js";
 
 export const CAMPAIGN_KINDS = ["estimate_followup", "membership_renewal", "reactivation", "after_job", "reminder", "custom", "contacts"] as const;
@@ -145,13 +147,13 @@ export async function createCampaign(org: Org, userId: string | null, input: z.i
   ))[0];
 
   // One CSV row per recipient: their memory travels with them.
-  const header = ["contact_number", "customer_id", "customer_name", "business_name", "profile", "context", "campaign_kind"];
+  const header = ["contact_number", "customer_phone", "greeting_name", "customer_id", "customer_name", "business_name", "profile", "context", "campaign_kind"];
   const extraKeys = Array.from(new Set(recipients.flatMap((r) => Object.keys(r.variables)))).filter((k) => !header.includes(k)).slice(0, 40);
   const lines = [[...header, ...extraKeys].join(",")];
   for (const r of recipients) {
     const cust = r.customerId ? await one("SELECT * FROM customers WHERE id = $1", [r.customerId]) : null;
     const mem = await buildCustomerMemory(org, cust ? toCustomer(cust) : null, now);
-    const vals = [r.phone, r.customerId || "", cust?.name || "", org.name, mem.profile.slice(0, 800), mem.context.slice(0, 1500), input.kind, ...extraKeys.map((k) => r.variables[k] || "")];
+    const vals = [r.phone, r.phone, (cust?.name || "").trim().split(/\s+/)[0] || "there", r.customerId || "", cust?.name || "", org.name, mem.profile.slice(0, 800), mem.context.slice(0, 1500), input.kind, ...extraKeys.map((k) => r.variables[k] || "")];
     lines.push(vals.map((v) => csvCell(String(v))).join(","));
     await q("INSERT INTO campaign_recipients (campaign_id, org_id, phone_e164, customer_id, variables) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING", [row.id, org.id, r.phone, r.customerId, JSON.stringify(r.variables)]);
   }
@@ -200,8 +202,14 @@ export async function campaignCommand(org: Org, id: string, command: "start" | "
 /** Refresh status and progress from the provider (poller). */
 export async function syncCampaign(org: Org, id: string) {
   const c = await getCampaignRow(org.id, id);
-  if (!c.provider_campaign_id || ["completed", "cancelled", "failed"].includes(c.status)) return c;
-  const remote = await rasen.getCampaign(await requireVoiceWorkspace(org.id), c.provider_campaign_id);
+  if (!c.provider_campaign_id) return c;
+  const ws = await requireVoiceWorkspace(org.id);
+  // Link each attempt's call to the number dialled (the provider's call record has no number).
+  try {
+    await harvestCampaignHints(org.id, c.id, await rasen.listCampaignRecipients(ws, c.provider_campaign_id, 5000));
+  } catch (err) { log.warn({ campaignId: c.id, err: (err as Error).message }, "could not read campaign recipients"); }
+  if (["completed", "cancelled", "failed"].includes(c.status)) return c;
+  const remote = await rasen.getCampaign(ws, c.provider_campaign_id);
   const mapped = mapRasenCampaignStatus(remote.status || remote.state);
   const status = mapped === "stopped" ? "cancelled" : ["draft", "scheduled", "running", "paused", "completed", "cancelled", "failed"].includes(mapped) ? mapped : c.status;
   return (await q("UPDATE campaigns SET status = $3, progress = $4, updated_at = now() WHERE org_id = $1 AND id = $2 RETURNING *", [org.id, id, status, JSON.stringify(remote.progress || remote.counts || {})]))[0];

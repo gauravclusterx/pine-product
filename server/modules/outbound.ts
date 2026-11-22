@@ -6,6 +6,7 @@
  */
 import { one, q } from "../db/pool.js";
 import { automationAllowed, hasCredit } from "./billing.js";
+import { rememberHint } from "./callHints.js";
 import { DeferJob, PermanentJobError, takeRateSlot } from "../queue/queue.js";
 import { nextCallableTime } from "../lib/time.js";
 import * as rasen from "../voice/rasen/service.js";
@@ -68,15 +69,21 @@ export async function placeCall(org: Org, input: PlaceCallInput): Promise<{ prov
       customerNumber: input.phone,
       fromNumber: org.settings.outboundNumber || null,
       customerName: customer?.name || undefined,
-      variableValues: { ...memory, ...(input.variables || {}) },
+      // customer_phone lets the agent's tools (book_job…) find this customer, like the CRM sets it.
+      variableValues: { ...memory, customer_phone: input.phone, ...(input.variables || {}) },
       metadata: { org_id: org.id, lead_id: input.leadId || "", campaign_id: input.campaignId || "", source: input.campaignId ? "campaign" : input.leadId ? "speed_to_lead" : "manual" },
       idempotencyKey: input.idempotencyKey,
     });
     await q(
       `INSERT INTO calls (org_id, provider_call_id, agent_id, direction, customer_id, lead_id, campaign_id, phone_e164, status, started_at)
-       VALUES ($1, $2, $3, 'outbound', $4, $5, $6, $7, 'queued', now()) ON CONFLICT (org_id, provider_call_id) DO NOTHING`,
+       VALUES ($1, $2, $3, 'outbound', $4, $5, $6, $7, 'queued', now())
+       ON CONFLICT (org_id, provider_call_id) DO UPDATE SET
+         phone_e164 = CASE WHEN calls.phone_e164 = '' THEN EXCLUDED.phone_e164 ELSE calls.phone_e164 END,
+         customer_id = COALESCE(calls.customer_id, EXCLUDED.customer_id), lead_id = COALESCE(calls.lead_id, EXCLUDED.lead_id),
+         campaign_id = COALESCE(calls.campaign_id, EXCLUDED.campaign_id)`,
       [org.id, call.id, agent.id, customer?.id || null, input.leadId || null, input.campaignId || null, input.phone]
     );
+    await rememberHint(org.id, call.id, { phone: input.phone, customerId: customer?.id || null, leadId: input.leadId || null, campaignId: input.campaignId || null });
     return { providerCallId: call.id };
   } catch (err) {
     if (rasen.isRasenBackpressure(err)) throw new DeferJob(30_000, "provider asked us to slow down");

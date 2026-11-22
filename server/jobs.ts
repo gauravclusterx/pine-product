@@ -118,7 +118,7 @@ export const handlers: Record<string, Handler> = {
     for (const r of await q("SELECT org_id FROM integrations WHERE kind = 'google_lsa' AND status <> 'disabled'")) {
       await enqueue("lsa.poll", {}, { orgId: r.org_id, dedupeKey: `lsa:${r.org_id}:${minute}` });
     }
-    for (const r of await q("SELECT id, org_id FROM campaigns WHERE status IN ('running','scheduled','paused')")) {
+    for (const r of await q("SELECT id, org_id FROM campaigns WHERE status IN ('running','scheduled','paused') OR (provider_campaign_id IS NOT NULL AND updated_at > now() - interval '6 hours')")) {
       await enqueue("campaign.sync", { campaignId: r.id }, { orgId: r.org_id, dedupeKey: `campaign-sync:${r.id}:${Math.floor(minute / 5)}` });
     }
     // Housekeeping.
