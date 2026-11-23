@@ -100,7 +100,7 @@ function Shell({ nav, top, footer, title, children }: { nav: NavItem[]; top?: Re
       <main className="min-w-0 p-3 sm:p-5 lg:p-7">
         <div className="panel rounded-[22px] overflow-hidden max-w-[1360px] mx-auto">
           <div className="relative hidden sm:flex items-center justify-center h-12 border-b border-white/10">
-            <div className="absolute left-5 flex gap-2"><i className="h-3 w-3 rounded-full bg-[#FF5F57]" /><i className="h-3 w-3 rounded-full bg-[#FEBC2E]" /><i className="h-3 w-3 rounded-full bg-[#28C840]" /></div>
+            
             <span className="font-display text-[17px] text-ink">{title}</span>
           </div>
           <div className="px-4 py-6 sm:px-8 sm:py-8 lg:px-10">{children}</div>
