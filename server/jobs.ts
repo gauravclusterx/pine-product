@@ -16,6 +16,7 @@ import { getOrg, findOrg, leadAgentFor } from "./modules/orgs.js";
 import { placeCall } from "./modules/outbound.js";
 import { finaliseCall, ingestCall } from "./modules/calls.js";
 import * as agentsModule from "./modules/agents.js";
+import { detachEverywhere } from "./routes/knowledge.js";
 import { analyseCall } from "./modules/callAnalysis.js";
 import { captureBookingFromCall } from "./modules/bookingCapture.js";
 import { leadVariables } from "./intake/leads.js";
@@ -58,6 +59,8 @@ export const handlers: Record<string, Handler> = {
   },
 
   "call.finalise": async (job) => { await finaliseCall(job.payload.callId); },
+
+  "knowledge.detach_all": async (job) => { await detachEverywhere(job.orgId!, job.payload.sourceId); },
 
   /** Publish an agent once every knowledge source has finished ingesting (website → agent ready). */
   "agent.knowledge_publish": async (job) => {

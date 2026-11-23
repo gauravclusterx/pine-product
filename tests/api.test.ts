@@ -648,12 +648,24 @@ describe("workspace knowledge library (Knowledge page)", () => {
     const c2 = await owner.agent.post("/api/agents").set(owner.csrf).send({ name: "Second", playbook: "inbound_booking" });
     const r = await owner.agent.post("/api/knowledge").set(owner.csrf).send({ kind: "url", url: "https://acme.com", agentIds: [a1.id] });
     expect(r.status).toBe(202);
-    let list = await owner.agent.get("/api/knowledge");
+    let list = await owner.agent.get("/api/knowledge?usage=1");
     expect(list.body.sources[0].agents.map((x: any) => x.name)).toEqual(["Ava"]);
     expect(list.body.agents.length).toBe(2);
     expect((await owner.agent.put("/api/knowledge/ks_site/agents").set(owner.csrf).send({ agentIds: [c2.body.agent.id] })).status).toBe(200);
-    list = await owner.agent.get("/api/knowledge");
+    list = await owner.agent.get("/api/knowledge?usage=1");
     expect(list.body.sources[0].agents.map((x: any) => x.name)).toEqual(["Second"]);
+    expect(list.body.sources[0].fromPine).toBe(true);
+    expect(await one("SELECT scope, kind, deleted_at FROM knowledge_sources WHERE org_id = $1 AND provider_source_id = $2", [orgId, "ks_site"])).toMatchObject({ scope: "workspace", kind: "url", deleted_at: null });
+    // Delete: archived at the provider, recorded as deleted, hidden at once, detached from every agent in the background.
+    const archived: string[] = [];
+    const s6 = vi.spyOn(svc, "archiveKnowledge").mockImplementation(async (...a: any[]) => { archived.push(a[1]); });
+    expect((await owner.agent.delete("/api/knowledge/ks_site").set(owner.csrf)).status).toBe(200);
+    expect(archived).toEqual(["ks_site"]);
+    expect((await one("SELECT deleted_at FROM knowledge_sources WHERE org_id = $1 AND provider_source_id = $2", [orgId, "ks_site"]))!.deleted_at).not.toBeNull();
+    expect((await owner.agent.get("/api/knowledge")).body.sources.length).toBe(0);
+    await createWorker({ handlers }).drain();
+    expect([...(libs.get((await one("SELECT provider_agent_id FROM agents WHERE id = $1", [c2.body.agent.id]))!.provider_agent_id) || [])]).toEqual([]);
+    s6.mockRestore();
     for (const s of [s1, s2, s3, s4, s5]) s.mockRestore();
   });
 });
