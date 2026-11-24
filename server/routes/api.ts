@@ -265,14 +265,19 @@ apiRouter.get("/voice/numbers", viewer, h(async (req, res) => {
   if (!(await one("SELECT 1 AS x FROM voice_workspaces WHERE org_id = $1", [req.auth!.orgId]))) return res.json({ numbers: [], connected: false });
   const ws = await requireVoiceWorkspace(req.auth!.orgId);
   const remote = await rasen.listMappedPhoneNumbers(ws);
+  // Rasen is the source of truth for who answers each number: the same workspace can be routed
+  // from elsewhere (the CRM, the Rasen console), so mirror its inbound agent onto our agent row
+  // (NULL when it is an agent this org does not have), and drop numbers Rasen no longer lists.
   for (const n of remote) {
     await q(
-      `INSERT INTO phone_numbers (org_id, provider_number_id, e164, label, supports_inbound, supports_outbound, synced_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now())
-       ON CONFLICT (org_id, provider_number_id) DO UPDATE SET e164 = EXCLUDED.e164, label = EXCLUDED.label, supports_inbound = EXCLUDED.supports_inbound, supports_outbound = EXCLUDED.supports_outbound, synced_at = now()`,
-      [req.auth!.orgId, n.id, n.phone_number, n.name || "", n.supports_inbound, n.supports_outbound]
+      `INSERT INTO phone_numbers (org_id, provider_number_id, e164, label, supports_inbound, supports_outbound, inbound_agent_id, inbound_setup, synced_at)
+       VALUES ($1, $2, $3, $4, $5, $6, (SELECT id FROM agents WHERE org_id = $1 AND provider_agent_id = $7 LIMIT 1), $8, now())
+       ON CONFLICT (org_id, provider_number_id) DO UPDATE SET e164 = EXCLUDED.e164, label = EXCLUDED.label, supports_inbound = EXCLUDED.supports_inbound,
+         supports_outbound = EXCLUDED.supports_outbound, inbound_agent_id = EXCLUDED.inbound_agent_id, inbound_setup = EXCLUDED.inbound_setup, synced_at = now()`,
+      [req.auth!.orgId, n.id, n.phone_number, n.name || "", n.supports_inbound, n.supports_outbound, n.inbound_agent_id, n.status]
     );
   }
+  await q("DELETE FROM phone_numbers WHERE org_id = $1 AND NOT (provider_number_id = ANY($2::text[]))", [req.auth!.orgId, remote.map((n) => n.id)]);
   res.json({ numbers: await q("SELECT p.*, a.name AS inbound_agent_name FROM phone_numbers p LEFT JOIN agents a ON a.id = p.inbound_agent_id WHERE p.org_id = $1 ORDER BY p.e164", [req.auth!.orgId]) });
 }));
 
